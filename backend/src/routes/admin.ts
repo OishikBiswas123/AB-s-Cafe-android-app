@@ -54,4 +54,15 @@ router.patch('/users/:id/reset-password', authenticate, authorize('owner'), asyn
   res.json({ success: true });
 });
 
+router.delete('/clear-data', authenticate, authorize('owner'), async (req, res) => {
+  const db = await getDatabase();
+  db.run('DELETE FROM payments');
+  db.run('DELETE FROM order_addons');
+  db.run('DELETE FROM order_items');
+  db.run('DELETE FROM orders');
+  db.run('UPDATE tables SET status = ?', ['available']);
+  saveDatabase();
+  res.json({ success: true, message: 'All data cleared successfully' });
+});
+
 export default router;

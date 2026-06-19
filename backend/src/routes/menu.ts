@@ -45,7 +45,7 @@ router.post('/items', authenticate, authorize('owner'), async (req, res) => {
   res.json({ success: true, id: db.exec("SELECT last_insert_rowid()")[0].values[0][0] });
 });
 
-router.put('/items/:id', authenticate, authorize('owner'), async (req, res) => {
+router.put('/items/:id', authenticate, authorize('owner', 'chef'), async (req, res) => {
   const { id } = req.params;
   const { name, price, category_id, description, available } = req.body;
   const db = await getDatabase();

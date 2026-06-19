@@ -73,4 +73,7 @@ interface ApiService {
 
     @PATCH("api/admin/users/{id}/reset-password")
     suspend fun resetPassword(@Path("id") id: Int, @Body body: Map<String, String>): Response<ApiResponse>
+
+    @DELETE("api/admin/clear-data")
+    suspend fun clearAllData(): Response<ApiResponse>
 }

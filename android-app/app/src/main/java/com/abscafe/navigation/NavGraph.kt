@@ -106,6 +106,7 @@ fun AppNavGraph(
                 menuRepo = menuRepo,
                 orderRepo = orderRepo,
                 tableRepo = tableRepo,
+                socketClient = socketClient,
                 onLogout = {
                     CoroutineScope(Dispatchers.Main).launch { tokenManager.clear() }
                     RetrofitClient.setToken(null)

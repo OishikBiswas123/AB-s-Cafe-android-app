@@ -5,7 +5,9 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -16,6 +18,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.abscafe.data.api.RetrofitClient
+import com.abscafe.data.api.SocketClient
 import com.abscafe.data.model.*
 import com.abscafe.data.repository.MenuRepository
 import com.abscafe.data.repository.OrderRepository
@@ -29,17 +32,29 @@ fun OwnerScreen(
     menuRepo: MenuRepository,
     orderRepo: OrderRepository,
     tableRepo: TableRepository,
-    onLogout: () -> Unit
+    onLogout: () -> Unit,
+    socketClient: SocketClient? = null
 ) {
     var currentTab by remember { mutableStateOf(0) }
+    var showLogoutDialog by remember { mutableStateOf(false) }
     val tabs = listOf("Dashboard", "Menu", "Tables", "Users")
+
+    if (showLogoutDialog) {
+        AlertDialog(
+            onDismissRequest = { showLogoutDialog = false },
+            title = { Text("Logout") },
+            text = { Text("Are you sure you want to logout?") },
+            confirmButton = { Button(onClick = { showLogoutDialog = false; onLogout() }) { Text("Yes") } },
+            dismissButton = { TextButton(onClick = { showLogoutDialog = false }) { Text("No") } }
+        )
+    }
 
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text("Owner Dashboard") },
                 actions = {
-                    IconButton(onClick = onLogout) { Icon(Icons.Default.Logout, "Logout") }
+                    IconButton(onClick = { showLogoutDialog = true }) { Icon(Icons.Default.Logout, "Logout") }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.primary,
@@ -62,7 +77,7 @@ fun OwnerScreen(
 
             when (currentTab) {
                 0 -> DashboardTab(menuRepo)
-                1 -> MenuManagementTab(menuRepo)
+                1 -> MenuManagementTab(menuRepo, socketClient)
                 2 -> TableManagementTab(tableRepo)
                 3 -> UserManagementTab()
             }
@@ -89,6 +104,8 @@ fun DashboardTab(menuRepo: MenuRepository) {
     }
 
     LaunchedEffect(selectedPeriod) { loadReport(selectedPeriod) }
+
+    var showClearData by remember { mutableStateOf(false) }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -161,6 +178,36 @@ fun DashboardTab(menuRepo: MenuRepository) {
                 }
             }
         }
+
+        item {
+            Spacer(modifier = Modifier.height(16.dp))
+            Button(
+                onClick = { showClearData = true },
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+            ) { Text("Clear All Data") }
+        }
+    }
+
+    if (showClearData) {
+        AlertDialog(
+            onDismissRequest = { showClearData = false },
+            title = { Text("Clear All Data") },
+            text = { Text("This will permanently delete all orders and payments. This action cannot be undone. Are you sure?") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showClearData = false
+                        scope.launch {
+                            try { RetrofitClient.apiService.clearAllData() } catch (_: Exception) {}
+                            loadReport(selectedPeriod)
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) { Text("Yes, Clear Everything") }
+            },
+            dismissButton = { TextButton(onClick = { showClearData = false }) { Text("Cancel") } }
+        )
     }
 }
 
@@ -173,7 +220,7 @@ fun StatItem(label: String, value: String, color: androidx.compose.ui.graphics.C
 }
 
 @Composable
-fun MenuManagementTab(menuRepo: MenuRepository) {
+fun MenuManagementTab(menuRepo: MenuRepository, socketClient: SocketClient? = null) {
     var categories by remember { mutableStateOf<List<Category>>(emptyList()) }
     var menuItems by remember { mutableStateOf<List<MenuItem>>(emptyList()) }
     var loading by remember { mutableStateOf(false) }
@@ -191,7 +238,14 @@ fun MenuManagementTab(menuRepo: MenuRepository) {
         }
     }
 
-    LaunchedEffect(Unit) { load() }
+    LaunchedEffect(Unit) {
+        load()
+        socketClient?.on("menu:updated") { load() }
+    }
+
+    DisposableEffect(Unit) {
+        onDispose { socketClient?.off("menu:updated") }
+    }
 
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
@@ -224,15 +278,21 @@ fun MenuManagementTab(menuRepo: MenuRepository) {
                                     onCheckedChange = { newAvailable ->
                                         scope.launch {
                                             try {
-                                                RetrofitClient.apiService.updateMenuItem(item.id, mapOf<String, Any>(
+                                                val resp = RetrofitClient.apiService.updateMenuItem(item.id, mapOf<String, Any>(
                                                     "name" to item.name,
                                                     "price" to item.price,
                                                     "category_id" to item.categoryId,
+                                                    "description" to item.description,
                                                     "available" to newAvailable
                                                 ))
-                                                menuItems = menuItems.map {
-                                                    if (it.id == item.id) it.copy(available = newAvailable)
-                                                    else it
+                                                if (resp.isSuccessful) {
+                                                    menuItems = menuItems.map {
+                                                        if (it.id == item.id) it.copy(available = newAvailable)
+                                                        else it
+                                                    }
+                                                    socketClient?.emit("menu:updated", org.json.JSONObject().apply { put("itemId", item.id); put("available", newAvailable) })
+                                                } else {
+                                                    snackbarHostState.showSnackbar("Failed to update")
                                                 }
                                             } catch (e: Exception) {
                                                 snackbarHostState.showSnackbar("Failed to update")
@@ -272,9 +332,17 @@ fun MenuManagementTab(menuRepo: MenuRepository) {
                 confirmButton = {
                     Button(onClick = {
                         scope.launch {
-                            RetrofitClient.apiService.createMenuItem(mapOf<String, Any>("name" to name, "price" to (price.toDoubleOrNull() ?: 0.0), "category_id" to catId))
-                            showAddDialog = false
-                            load()
+                            try {
+                                val resp = RetrofitClient.apiService.createMenuItem(mapOf<String, Any>("name" to name, "price" to (price.toDoubleOrNull() ?: 0.0), "category_id" to catId))
+                                if (resp.isSuccessful) {
+                                    showAddDialog = false
+                                    load()
+                                } else {
+                                    snackbarHostState.showSnackbar("Failed to add item")
+                                }
+                            } catch (e: Exception) {
+                                snackbarHostState.showSnackbar("Network error")
+                            }
                         }
                     }) { Text("Add") }
                 },
@@ -338,16 +406,54 @@ fun TableManagementTab(tableRepo: TableRepository) {
                 onDismissRequest = { showAddDialog = false },
                 title = { Text("Add Table") },
                 text = {
-                    OutlinedTextField(value = newTableNumber, onValueChange = { newTableNumber = it }, label = { Text("Table Number") }, modifier = Modifier.fillMaxWidth())
+                    Column {
+                        Text("Add 5 tables (next available numbers)", fontWeight = FontWeight.Medium)
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Button(
+                            onClick = {
+                                scope.launch {
+                                    val maxNum = tables.maxOfOrNull { it.number } ?: 0
+                                    for (i in 1..5) {
+                                        try {
+                                            RetrofitClient.apiService.createTable(mapOf("number" to (maxNum + i)))
+                                        } catch (_: Exception) {}
+                                    }
+                                    showAddDialog = false
+                                    load()
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) { Text("Add 5 Tables") }
+                        Spacer(modifier = Modifier.height(16.dp))
+                        HorizontalDivider()
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text("Or add a custom table number:", fontWeight = FontWeight.Medium)
+                        Spacer(modifier = Modifier.height(4.dp))
+                        OutlinedTextField(value = newTableNumber, onValueChange = { newTableNumber = it }, label = { Text("Table Number") }, modifier = Modifier.fillMaxWidth(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
+                    }
                 },
                 confirmButton = {
                     Button(onClick = {
-                        scope.launch {
-                            RetrofitClient.apiService.createTable(mapOf("number" to (newTableNumber.toIntOrNull() ?: 0)))
-                            showAddDialog = false
-                            load()
+                        val num = newTableNumber.toIntOrNull()
+                        if (num == null || num <= 0) {
+                            scope.launch { snackbarHostState.showSnackbar("Enter a valid table number") }
+                        } else {
+                            scope.launch {
+                                try {
+                                    val resp = RetrofitClient.apiService.createTable(mapOf("number" to num))
+                                    if (resp.isSuccessful) {
+                                        showAddDialog = false
+                                        load()
+                                    } else {
+                                        val err = resp.errorBody()?.string() ?: "Table may already exist"
+                                        snackbarHostState.showSnackbar("Failed: $err")
+                                    }
+                                } catch (e: Exception) {
+                                    snackbarHostState.showSnackbar("Network error")
+                                }
+                            }
                         }
-                    }) { Text("Add") }
+                    }) { Text("Add Table") }
                 },
                 dismissButton = { TextButton(onClick = { showAddDialog = false }) { Text("Cancel") } }
             )
@@ -434,9 +540,18 @@ fun UserManagementTab() {
                 confirmButton = {
                     Button(onClick = {
                         scope.launch {
-                            RetrofitClient.apiService.createUser(mapOf("name" to newName, "email" to newEmail, "password" to newPassword, "role" to newRole))
-                            showAddDialog = false
-                            load()
+                            try {
+                                val resp = RetrofitClient.apiService.createUser(mapOf("name" to newName, "email" to newEmail, "password" to newPassword, "role" to newRole))
+                                if (resp.isSuccessful) {
+                                    showAddDialog = false
+                                    load()
+                                } else {
+                                    val err = resp.errorBody()?.string() ?: "Failed to add user"
+                                    snackbarHostState.showSnackbar("Error: $err")
+                                }
+                            } catch (e: Exception) {
+                                snackbarHostState.showSnackbar("Network error")
+                            }
                         }
                     }) { Text("Add") }
                 },

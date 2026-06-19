@@ -33,6 +33,7 @@ fun ChefScreen(
     var orders by remember { mutableStateOf<List<Order>>(emptyList()) }
     var loading by remember { mutableStateOf(false) }
     var filterStatus by remember { mutableStateOf<String?>(null) }
+    var showLogoutDialog by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
 
@@ -49,13 +50,25 @@ fun ChefScreen(
 
         socketClient.on("order:new") { loadOrders() }
         socketClient.on("order:modified") { loadOrders() }
+        socketClient.on("menu:updated") { loadOrders() }
     }
 
     DisposableEffect(Unit) {
         onDispose {
             socketClient.off("order:new")
             socketClient.off("order:modified")
+            socketClient.off("menu:updated")
         }
+    }
+
+    if (showLogoutDialog) {
+        AlertDialog(
+            onDismissRequest = { showLogoutDialog = false },
+            title = { Text("Logout") },
+            text = { Text("Are you sure you want to logout?") },
+            confirmButton = { Button(onClick = { showLogoutDialog = false; onLogout() }) { Text("Yes") } },
+            dismissButton = { TextButton(onClick = { showLogoutDialog = false }) { Text("No") } }
+        )
     }
 
     val filteredOrders = when (filterStatus) {
@@ -72,7 +85,7 @@ fun ChefScreen(
                 title = { Text(if (currentTab == 0) "Kitchen Orders" else "Menu Items") },
                 actions = {
                     IconButton(onClick = { loadOrders() }) { Icon(Icons.Default.Refresh, "Refresh") }
-                    IconButton(onClick = onLogout) { Icon(Icons.Default.Logout, "Logout") }
+                    IconButton(onClick = { showLogoutDialog = true }) { Icon(Icons.Default.Logout, "Logout") }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.primary,
@@ -91,7 +104,7 @@ fun ChefScreen(
             }
 
             if (currentTab == 1) {
-                ChefMenuManagementTab(snackbarHostState)
+                ChefMenuManagementTab(snackbarHostState, socketClient)
             } else {
                 LazyRow(
                     modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
@@ -276,7 +289,7 @@ fun KitchenOrderCard(
 }
 
 @Composable
-fun ChefMenuManagementTab(snackbarHostState: SnackbarHostState) {
+fun ChefMenuManagementTab(snackbarHostState: SnackbarHostState, socketClient: com.abscafe.data.api.SocketClient? = null) {
     var categories by remember { mutableStateOf<List<Category>>(emptyList()) }
     var menuItems by remember { mutableStateOf<List<MenuItem>>(emptyList()) }
     var loading by remember { mutableStateOf(false) }
@@ -296,7 +309,14 @@ fun ChefMenuManagementTab(snackbarHostState: SnackbarHostState) {
         }
     }
 
-    LaunchedEffect(Unit) { load() }
+    LaunchedEffect(Unit) {
+        load()
+        socketClient?.on("menu:updated") { load() }
+    }
+
+    DisposableEffect(Unit) {
+        onDispose { socketClient?.off("menu:updated") }
+    }
 
     Column(modifier = Modifier.fillMaxSize()) {
         LazyRow(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -321,13 +341,19 @@ fun ChefMenuManagementTab(snackbarHostState: SnackbarHostState) {
                                 onCheckedChange = { newAvailable ->
                                     scope.launch {
                                         try {
-                                            RetrofitClient.apiService.updateMenuItem(item.id, mapOf<String, Any>(
+                                            val resp = RetrofitClient.apiService.updateMenuItem(item.id, mapOf<String, Any>(
                                                 "name" to item.name,
                                                 "price" to item.price,
                                                 "category_id" to item.categoryId,
+                                                "description" to item.description,
                                                 "available" to newAvailable
                                             ))
-                                            menuItems = menuItems.map { if (it.id == item.id) it.copy(available = newAvailable) else it }
+                                            if (resp.isSuccessful) {
+                                                menuItems = menuItems.map { if (it.id == item.id) it.copy(available = newAvailable) else it }
+                                                socketClient?.emit("menu:updated", org.json.JSONObject().apply { put("itemId", item.id); put("available", newAvailable) })
+                                            } else {
+                                                snackbarHostState.showSnackbar("Failed to update")
+                                            }
                                         } catch (e: Exception) {
                                             snackbarHostState.showSnackbar("Failed to update")
                                         }

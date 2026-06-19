@@ -60,6 +60,7 @@ fun WaiterScreen(
     var selectedOrderForAdd by remember { mutableStateOf<Order?>(null) }
     var showAddItemMenu by remember { mutableStateOf(false) }
     var addItemCart by remember { mutableStateOf<List<CartItem>>(emptyList()) }
+    var showLogoutDialog by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
 
@@ -74,7 +75,24 @@ fun WaiterScreen(
         }
     }
 
-    LaunchedEffect(Unit) { loadData() }
+    LaunchedEffect(Unit) {
+        loadData()
+        socketClient.on("menu:updated") { loadData() }
+    }
+
+    DisposableEffect(Unit) {
+        onDispose { socketClient.off("menu:updated") }
+    }
+
+    if (showLogoutDialog) {
+        AlertDialog(
+            onDismissRequest = { showLogoutDialog = false },
+            title = { Text("Logout") },
+            text = { Text("Are you sure you want to logout?") },
+            confirmButton = { Button(onClick = { showLogoutDialog = false; onLogout() }) { Text("Yes") } },
+            dismissButton = { TextButton(onClick = { showLogoutDialog = false }) { Text("No") } }
+        )
+    }
 
     Scaffold(
         topBar = {
@@ -100,7 +118,7 @@ fun WaiterScreen(
                 },
                 actions = {
                     if (currentScreen == "tables") {
-                        IconButton(onClick = onLogout) { Icon(Icons.Default.Logout, "Logout") }
+                        IconButton(onClick = { showLogoutDialog = true }) { Icon(Icons.Default.Logout, "Logout") }
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -122,7 +140,7 @@ fun WaiterScreen(
                     cart = addItemCart,
                     onSelectCategory = { selectedCategory = it },
                     onQuantityChange = { item, delta ->
-                        addItemCart = addItemCart.map { if (it.menuItem.id == item.id) it.copy(quantity = (it.quantity + delta).coerceAtLeast(1)) else it }
+                        addItemCart = addItemCart.mapNotNull { if (it.menuItem.id == item.id) { val nq = it.quantity + delta; if (nq <= 0) null else it.copy(quantity = nq) } else it }
                         if (addItemCart.none { it.menuItem.id == item.id }) {
                             addItemCart = addItemCart + CartItem(item)
                         }
@@ -153,8 +171,7 @@ fun WaiterScreen(
                     cart = cart,
                     isTakeaway = isTakeaway,
                     onQuantityChange = { itemId, delta ->
-                        cart = cart.map { if (it.menuItem.id == itemId) it.copy(quantity = (it.quantity + delta).coerceAtLeast(1)) else it }
-                        if (cart.none { it.menuItem.id == itemId }) cart = cart.filterNot { it.menuItem.id == itemId }
+                        cart = cart.mapNotNull { if (it.menuItem.id == itemId) { val nq = it.quantity + delta; if (nq <= 0) null else it.copy(quantity = nq) } else it }
                     },
                     onRemoveItem = { itemId -> cart = cart.filterNot { it.menuItem.id == itemId } },
                     onToggleCheese = { itemId ->
@@ -209,8 +226,7 @@ fun WaiterScreen(
                         cart = cart + CartItem(item)
                     },
                     onQuantityChange = { itemId, delta ->
-                        cart = cart.map { if (it.menuItem.id == itemId) it.copy(quantity = (it.quantity + delta).coerceAtLeast(1)) else it }
-                        if (cart.none { it.menuItem.id == itemId }) cart = cart.filterNot { it.menuItem.id == itemId }
+                        cart = cart.mapNotNull { if (it.menuItem.id == itemId) { val nq = it.quantity + delta; if (nq <= 0) null else it.copy(quantity = nq) } else it }
                     },
                     onViewCart = { showCart = true }
                 )
@@ -324,8 +340,8 @@ fun MenuScreen(
     onQuantityChange: (Int, Int) -> Unit,
     onViewCart: () -> Unit
 ) {
-    val filteredItems = if (selectedCategory != null) menuItems.filter { it.categoryId == selectedCategory }
-    else menuItems
+    val filteredItems = (if (selectedCategory != null) menuItems.filter { it.categoryId == selectedCategory }
+    else menuItems).filter { it.available }
     val cartCount = cart.sumOf { it.quantity }
 
     Column(modifier = Modifier.fillMaxSize()) {
@@ -533,8 +549,8 @@ fun AddItemMenuScreen(
     onSubmit: () -> Unit,
     onCancel: () -> Unit
 ) {
-    val filteredItems = if (selectedCategory != null) menuItems.filter { it.categoryId == selectedCategory }
-    else menuItems
+    val filteredItems = (if (selectedCategory != null) menuItems.filter { it.categoryId == selectedCategory }
+    else menuItems).filter { it.available }
 
     Column(modifier = Modifier.fillMaxSize()) {
         LazyRow(

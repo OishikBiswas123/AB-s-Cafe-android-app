@@ -42,6 +42,7 @@ fun CashierScreen(
     var loading by remember { mutableStateOf(false) }
     var selectedOrder by remember { mutableStateOf<Order?>(null) }
     var showPaymentDialog by remember { mutableStateOf(false) }
+    var showLogoutDialog by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
 
@@ -56,13 +57,23 @@ fun CashierScreen(
     LaunchedEffect(Unit) { loadOrders() }
     val loadOrdersRef = { loadOrders() }
 
+    if (showLogoutDialog) {
+        AlertDialog(
+            onDismissRequest = { showLogoutDialog = false },
+            title = { Text("Logout") },
+            text = { Text("Are you sure you want to logout?") },
+            confirmButton = { Button(onClick = { showLogoutDialog = false; onLogout() }) { Text("Yes") } },
+            dismissButton = { TextButton(onClick = { showLogoutDialog = false }) { Text("No") } }
+        )
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text("Billing Counter") },
                 actions = {
                     IconButton(onClick = loadOrdersRef) { Icon(Icons.Default.Refresh, "Refresh") }
-                    IconButton(onClick = onLogout) { Icon(Icons.Default.Logout, "Logout") }
+                    IconButton(onClick = { showLogoutDialog = true }) { Icon(Icons.Default.Logout, "Logout") }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.primary,

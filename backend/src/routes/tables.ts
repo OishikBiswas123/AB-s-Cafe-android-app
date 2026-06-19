@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { getDatabase } from '../database';
+import { getDatabase, saveDatabase } from '../database';
 import { authenticate, authorize, AuthRequest } from '../middleware/auth';
 
 const router = Router();
@@ -26,10 +26,11 @@ router.patch('/:id/status', authenticate, authorize('owner', 'waiter', 'cashier'
 
 router.post('/', authenticate, authorize('owner'), async (req, res) => {
   const { number } = req.body;
-  if (!number) return res.status(400).json({ error: 'Table number required' });
+  if (number === undefined || number === null || number === '') return res.status(400).json({ error: 'Table number required' });
   const db = await getDatabase();
   try {
     db.run('INSERT INTO tables (number, status) VALUES (?, ?)', [number, 'available']);
+    saveDatabase();
     res.json({ success: true, id: db.exec("SELECT last_insert_rowid()")[0].values[0][0] });
   } catch {
     res.status(409).json({ error: 'Table number already exists' });

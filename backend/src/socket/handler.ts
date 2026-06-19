@@ -48,6 +48,10 @@ export function setupSocket(io: SocketServer) {
       io.to('role:cashier').emit('order:status-change', data);
     });
 
+    socket.on('menu:updated', (data) => {
+      io.emit('menu:updated', data);
+    });
+
     socket.on('order:paid', (data) => {
       io.emit('table:released', { table_id: data.table_id });
       io.to('role:owner').emit('payment:completed', data);
