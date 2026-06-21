@@ -278,7 +278,7 @@ fun MenuManagementTab(menuRepo: MenuRepository, socketClient: SocketClient? = nu
                                     onCheckedChange = { newAvailable ->
                                         scope.launch {
                                             try {
-                                                val resp = RetrofitClient.apiService.toggleMenuItemAvailability(item.id, mapOf("available" to newAvailable))
+                                                val resp = RetrofitClient.apiService.toggleMenuItemAvailability(item.id, AvailabilityRequest(newAvailable))
                                                 if (resp.isSuccessful) {
                                                     menuItems = menuItems.map {
                                                         if (it.id == item.id) it.copy(available = newAvailable)
@@ -498,13 +498,29 @@ fun UserManagementTab() {
                                     Text(user.role.replaceFirstChar { it.uppercase() }, modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp), fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
                                 }
                             }
-                            if (user.id > 4) {
-                                IconButton(onClick = {
-                                    scope.launch {
-                                        RetrofitClient.apiService.deleteUser(user.id)
-                                        load()
-                                    }
-                                }) { Icon(Icons.Default.Delete, "Delete", tint = MaterialTheme.colorScheme.error) }
+                            val isDefaultUser = user.email in listOf("owner@abscafe.com", "waiter@abscafe.com", "chef@abscafe.com", "cashier@abscafe.com")
+                            if (!isDefaultUser) {
+                                var showDeleteConfirm by remember { mutableStateOf(false) }
+                                IconButton(onClick = { showDeleteConfirm = true }) { Icon(Icons.Default.Delete, "Delete", tint = MaterialTheme.colorScheme.error) }
+                                if (showDeleteConfirm) {
+                                    AlertDialog(
+                                        onDismissRequest = { showDeleteConfirm = false },
+                                        title = { Text("Delete User?") },
+                                        text = { Text("Are you sure you want to delete ${user.name} (${user.email})?") },
+                                        confirmButton = {
+                                            TextButton(onClick = {
+                                                showDeleteConfirm = false
+                                                scope.launch {
+                                                    RetrofitClient.apiService.deleteUser(user.id)
+                                                    load()
+                                                }
+                                            }) { Text("Delete", color = MaterialTheme.colorScheme.error) }
+                                        },
+                                        dismissButton = {
+                                            TextButton(onClick = { showDeleteConfirm = false }) { Text("Cancel") }
+                                        }
+                                    )
+                                }
                             }
                         }
                     }

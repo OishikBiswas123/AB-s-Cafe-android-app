@@ -139,6 +139,10 @@ data class StatusUpdate(
     val status: String
 )
 
+data class AvailabilityRequest(
+    val available: Boolean
+)
+
 data class CartItem(
     val menuItem: MenuItem,
     var quantity: Int = 1,

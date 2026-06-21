@@ -15,9 +15,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.abscafe.data.api.RetrofitClient
 import com.abscafe.data.api.SocketClient
-import com.abscafe.data.model.Category
-import com.abscafe.data.model.MenuItem
-import com.abscafe.data.model.Order
+import com.abscafe.data.model.*
 import com.abscafe.data.repository.OrderRepository
 import com.abscafe.ui.theme.*
 import kotlinx.coroutines.launch
@@ -326,7 +324,7 @@ fun ChefMenuManagementTab(snackbarHostState: SnackbarHostState, socketClient: co
                                 onCheckedChange = { newAvailable ->
                                     scope.launch {
                                         try {
-                                            val resp = RetrofitClient.apiService.toggleMenuItemAvailability(item.id, mapOf("available" to newAvailable))
+                                            val resp = RetrofitClient.apiService.toggleMenuItemAvailability(item.id, AvailabilityRequest(newAvailable))
                                             if (resp.isSuccessful) {
                                                 menuItems = menuItems.map { if (it.id == item.id) it.copy(available = newAvailable) else it }
                                                 socketClient?.emit("menu:updated", org.json.JSONObject().apply { put("itemId", item.id); put("available", newAvailable) })

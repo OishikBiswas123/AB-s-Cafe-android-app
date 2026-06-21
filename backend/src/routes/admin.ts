@@ -35,11 +35,15 @@ router.post('/users', authenticate, authorize('owner'), async (req, res) => {
 
 router.delete('/users/:id', authenticate, authorize('owner'), async (req, res) => {
   const { id } = req.params;
-  const userId = Number(id);
-  if (userId <= 4) {
+  const db = await getDatabase();
+  const userResult = await db.query('SELECT email FROM users WHERE id = $1', [id]);
+  if (userResult.rows.length === 0) {
+    return res.status(404).json({ error: 'User not found' });
+  }
+  const protectedEmails = ['owner@abscafe.com', 'waiter@abscafe.com', 'chef@abscafe.com', 'cashier@abscafe.com'];
+  if (protectedEmails.includes(userResult.rows[0].email)) {
     return res.status(403).json({ error: 'Cannot delete default users' });
   }
-  const db = await getDatabase();
   await db.query('DELETE FROM users WHERE id = $1', [id]);
   res.json({ success: true });
 });
