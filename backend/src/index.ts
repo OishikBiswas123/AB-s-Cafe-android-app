@@ -2,7 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import http from 'http';
 import { Server as SocketServer } from 'socket.io';
-import { getDatabase, saveDatabase, closeDatabase } from './database';
+import { getDatabase, closeDatabase } from './database';
 import { setupSocket } from './socket/handler';
 import authRoutes from './routes/auth';
 import tableRoutes from './routes/tables';
@@ -43,15 +43,18 @@ getDatabase().then(() => {
     console.log(`AB's Cafe backend running on http://${HOST}:${PORT}`);
     console.log(`WebSocket server ready`);
   });
+}).catch((err) => {
+  console.error('Failed to initialize database:', err);
+  process.exit(1);
 });
 
-process.on('SIGINT', () => {
-  closeDatabase();
+process.on('SIGINT', async () => {
+  await closeDatabase();
   process.exit(0);
 });
 
-process.on('SIGTERM', () => {
-  closeDatabase();
+process.on('SIGTERM', async () => {
+  await closeDatabase();
   process.exit(0);
 });
 

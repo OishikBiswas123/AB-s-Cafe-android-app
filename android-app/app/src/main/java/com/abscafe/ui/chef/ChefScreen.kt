@@ -144,20 +144,6 @@ fun ChefScreen(
                         items(filteredOrders) { order ->
                             KitchenOrderCard(
                                 order = order,
-                                onUpdateStatus = { itemId, status ->
-                                    scope.launch {
-                                        orderRepo.updateItemStatus(itemId, status).onSuccess {
-                                            val json = JSONObject().apply {
-                                                put("order_id", order.id)
-                                                put("item_id", itemId)
-                                                put("status", status)
-                                                put("table_id", order.tableId)
-                                            }
-                                            socketClient.emit("order:status", json)
-                                            loadOrders()
-                                        }
-                                    }
-                                },
                                 onUpdateOrderStatus = { status ->
                                     scope.launch {
                                         orderRepo.updateOrderStatus(order.id, status).onSuccess {
@@ -183,7 +169,6 @@ fun ChefScreen(
 @Composable
 fun KitchenOrderCard(
     order: Order,
-    onUpdateStatus: (Int, String) -> Unit,
     onUpdateOrderStatus: (String) -> Unit
 ) {
     val statusColor = when (order.status) {
@@ -232,13 +217,6 @@ fun KitchenOrderCard(
             Spacer(modifier = Modifier.height(12.dp))
 
             order.items.forEach { item ->
-                val itemStatusColor = when (item.status) {
-                    "pending" -> PendingColor
-                    "preparing" -> PreparingColor
-                    "ready" -> ReadyColor
-                    else -> PaidColor
-                }
-
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
                     verticalAlignment = Alignment.CenterVertically
@@ -252,18 +230,25 @@ fun KitchenOrderCard(
                             Text("Note: ${item.notes}", fontSize = 12.sp, color = MaterialTheme.colorScheme.error.copy(alpha = 0.7f))
                         }
                     }
-                    Row {
-                        when (item.status) {
-                            "pending" -> {
-                                SmallButton(onClick = { onUpdateStatus(item.id, "preparing") }, colors = ButtonDefaults.buttonColors(containerColor = PreparingColor)) { Text("Start", fontSize = 11.sp, color = OnPrimary) }
+                    Surface(
+                        color = when (item.status) {
+                            "pending" -> PendingColor.copy(alpha = 0.2f)
+                            "preparing" -> PreparingColor.copy(alpha = 0.2f)
+                            else -> ReadyColor.copy(alpha = 0.2f)
+                        },
+                        shape = MaterialTheme.shapes.small
+                    ) {
+                        Text(
+                            item.status.replaceFirstChar { it.uppercase() },
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = when (item.status) {
+                                "pending" -> PendingColor
+                                "preparing" -> PreparingColor
+                                else -> ReadyColor
                             }
-                            "preparing" -> {
-                                SmallButton(onClick = { onUpdateStatus(item.id, "ready") }, colors = ButtonDefaults.buttonColors(containerColor = ReadyColor)) { Text("Ready", fontSize = 11.sp, color = OnPrimary) }
-                            }
-                            "ready" -> {
-                                Icon(Icons.Default.CheckCircle, "Done", tint = ReadyColor, modifier = Modifier.size(24.dp))
-                            }
-                        }
+                        )
                     }
                 }
                 Spacer(modifier = Modifier.height(4.dp))
@@ -352,10 +337,11 @@ fun ChefMenuManagementTab(snackbarHostState: SnackbarHostState, socketClient: co
                                                 menuItems = menuItems.map { if (it.id == item.id) it.copy(available = newAvailable) else it }
                                                 socketClient?.emit("menu:updated", org.json.JSONObject().apply { put("itemId", item.id); put("available", newAvailable) })
                                             } else {
-                                                snackbarHostState.showSnackbar("Failed to update")
+                                                val errBody = resp.errorBody()?.string() ?: "Unknown"
+                                                snackbarHostState.showSnackbar("API error: ${resp.code()} - $errBody")
                                             }
                                         } catch (e: Exception) {
-                                            snackbarHostState.showSnackbar("Failed to update")
+                                            snackbarHostState.showSnackbar("Exception: ${e.message}")
                                         }
                                     }
                                 }
@@ -371,17 +357,4 @@ fun ChefMenuManagementTab(snackbarHostState: SnackbarHostState, socketClient: co
         }
     }
 
-@Composable
-fun SmallButton(
-    onClick: () -> Unit,
-    colors: ButtonColors,
-    modifier: Modifier = Modifier,
-    content: @Composable RowScope.() -> Unit
-) {
-    Button(
-        onClick = onClick,
-        modifier = modifier.height(32.dp),
-        colors = colors,
-        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
-    ) { content() }
-}
+

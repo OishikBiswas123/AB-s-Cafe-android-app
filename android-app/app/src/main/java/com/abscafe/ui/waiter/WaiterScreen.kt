@@ -78,10 +78,14 @@ fun WaiterScreen(
     LaunchedEffect(Unit) {
         loadData()
         socketClient.on("menu:updated") { loadData() }
+        socketClient.on("order:update") { loadData() }
     }
 
     DisposableEffect(Unit) {
-        onDispose { socketClient.off("menu:updated") }
+        onDispose {
+            socketClient.off("menu:updated")
+            socketClient.off("order:update")
+        }
     }
 
     if (showLogoutDialog) {
@@ -316,6 +320,25 @@ fun TableCard(
                 color = if (isOccupied) Occupied else Available
             )
             if (isOccupied && order != null) {
+                Spacer(modifier = Modifier.height(4.dp))
+                val statusColor = when (order.status) {
+                    "pending" -> PendingColor
+                    "preparing" -> PreparingColor
+                    "ready" -> ReadyColor
+                    else -> Available
+                }
+                Surface(
+                    color = statusColor.copy(alpha = 0.2f),
+                    shape = MaterialTheme.shapes.small
+                ) {
+                    Text(
+                        order.status.replaceFirstChar { it.uppercase() },
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = statusColor
+                    )
+                }
                 Spacer(modifier = Modifier.height(4.dp))
                 Text("₹${order.total}", fontWeight = FontWeight.Bold, fontSize = 14.sp)
                 Spacer(modifier = Modifier.height(4.dp))

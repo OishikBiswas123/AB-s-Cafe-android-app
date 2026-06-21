@@ -13,26 +13,27 @@ router.post('/login', async (req, res) => {
     }
 
     const db = await getDatabase();
-    const result = db.exec(
-      'SELECT id, name, email, password_hash, role FROM users WHERE email = ?',
+    const result = await db.query(
+      'SELECT id, name, email, password_hash, role FROM users WHERE email = $1',
       [email]
     );
 
-    if (!result.length || !result[0].values.length) {
+    if (!result.rows.length) {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
-    const [id, name, userEmail, passwordHash, role] = result[0].values[0];
-    const valid = await bcrypt.compare(password, passwordHash as string);
+    const user = result.rows[0];
+    const valid = await bcrypt.compare(password, user.password_hash);
     if (!valid) {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
-    const user = { id: id as number, name: name as string, email: userEmail as string, role: role as any };
-    const token = generateToken(user);
+    const tokenUser = { id: user.id, name: user.name, email: user.email, role: user.role };
+    const token = generateToken(tokenUser);
 
-    res.json({ token, user });
+    res.json({ token, user: tokenUser });
   } catch (error) {
+    console.error('Login error:', error);
     res.status(500).json({ error: 'Login failed' });
   }
 });

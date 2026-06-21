@@ -92,9 +92,9 @@ fun SplashScreen() {
             Image(
                 painter = painterResource(id = R.drawable.abs_cafe_logo),
                 contentDescription = "AB's Cafe Logo",
-                modifier = Modifier.size(180.dp)
+                modifier = Modifier.size(280.dp)
             )
-            Spacer(modifier = Modifier.height(32.dp))
+            Spacer(modifier = Modifier.height(120.dp))
             LinearProgressIndicator(modifier = Modifier.width(200.dp))
             Spacer(modifier = Modifier.height(4.dp))
             Text(

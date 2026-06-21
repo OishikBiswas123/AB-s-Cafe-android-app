@@ -1,11 +1,11 @@
 import bcrypt from 'bcryptjs';
-import { getDatabase, saveDatabase } from './database';
+import { getDatabase } from './database';
 
 async function seed() {
   const db = await getDatabase();
 
-  const existingUsers = db.exec("SELECT COUNT(*) as count FROM users");
-  if (existingUsers[0]?.values[0][0] > 0) {
+  const existingUsers = await db.query("SELECT COUNT(*) as count FROM users");
+  if (parseInt(existingUsers.rows[0].count) > 0) {
     console.log('Database already seeded. Skipping.');
     return;
   }
@@ -13,18 +13,18 @@ async function seed() {
   const ownerHash = await bcrypt.hash('admin123', 10);
   const staffHash = await bcrypt.hash('staff123', 10);
 
-  db.run(`INSERT INTO users (name, email, password_hash, role) VALUES
-    ('Owner', 'owner@abscafe.com', ?, 'owner'),
-    ('Waiter 1', 'waiter@abscafe.com', ?, 'waiter'),
-    ('Chef', 'chef@abscafe.com', ?, 'chef'),
-    ('Cashier', 'cashier@abscafe.com', ?, 'cashier')
-  `, [ownerHash, staffHash, staffHash, staffHash]);
+  await db.query(`INSERT INTO users (name, email, password_hash, role) VALUES
+    ($1, 'owner@abscafe.com', $2, 'owner'),
+    ($3, 'waiter@abscafe.com', $4, 'waiter'),
+    ($5, 'chef@abscafe.com', $6, 'chef'),
+    ($7, 'cashier@abscafe.com', $8, 'cashier')
+  `, [ownerHash, ownerHash, staffHash, staffHash, staffHash, staffHash, staffHash, staffHash]);
 
   for (let i = 1; i <= 18; i++) {
-    db.run('INSERT INTO tables (number, status) VALUES (?, ?)', [i, 'available']);
+    await db.query('INSERT INTO tables (number, status) VALUES ($1, $2)', [i, 'available']);
   }
 
-  db.run(`INSERT INTO categories (name, sort_order) VALUES
+  await db.query(`INSERT INTO categories (name, sort_order) VALUES
     ('Tea & Coffee', 1),
     ('Snacks', 2),
     ('Maggi & Noodles', 3),
@@ -34,7 +34,7 @@ async function seed() {
     ('Cold Drinks', 7)
   `);
 
-  db.run(`INSERT INTO menu_items (name, price, category_id) VALUES
+  await db.query(`INSERT INTO menu_items (name, price, category_id) VALUES
     ('Black Tea', 10, 1),
     ('Lemon Tea', 15, 1),
     ('Milk Tea (Small)', 10, 1),
@@ -85,7 +85,6 @@ async function seed() {
     ('Pineapple Mojito', 70, 7)
   `);
 
-  saveDatabase();
   console.log('Database seeded successfully!');
   console.log('Login credentials:');
   console.log('  Owner:   owner@abscafe.com / admin123');

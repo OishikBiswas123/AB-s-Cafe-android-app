@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { getDatabase, saveDatabase } from '../database';
+import { getDatabase } from '../database';
 import { authenticate, authorize, AuthRequest } from '../middleware/auth';
 
 const router = Router();
@@ -24,29 +24,28 @@ router.post('/', authenticate, authorize('waiter', 'owner'), async (req: AuthReq
     return sum + (item.price + addonTotal) * item.quantity;
   }, 0);
 
-  db.run(
-    'INSERT INTO orders (table_id, waiter_id, status, total, is_takeaway) VALUES (?, ?, ?, ?, ?)',
-    [table_id, req.user!.id, 'pending', total, is_takeaway ? 1 : 0]
+  const orderResult = await db.query(
+    'INSERT INTO orders (table_id, waiter_id, status, total, is_takeaway) VALUES ($1, $2, $3, $4, $5) RETURNING id',
+    [table_id, req.user!.id, 'pending', total, is_takeaway ? true : false]
   );
-  const orderId = db.exec("SELECT last_insert_rowid()")[0].values[0][0] as number;
+  const orderId = orderResult.rows[0].id;
 
   for (const item of items) {
-    db.run(
-      'INSERT INTO order_items (order_id, menu_item_id, quantity, price, notes) VALUES (?, ?, ?, ?, ?)',
+    const itemResult = await db.query(
+      'INSERT INTO order_items (order_id, menu_item_id, quantity, price, notes) VALUES ($1, $2, $3, $4, $5) RETURNING id',
       [orderId, item.menu_item_id, item.quantity, item.price, item.notes || '']
     );
-    const orderItemId = db.exec("SELECT last_insert_rowid()")[0].values[0][0] as number;
+    const orderItemId = itemResult.rows[0].id;
 
     if (item.addons?.length) {
       for (const addon of item.addons) {
-        db.run('INSERT INTO order_addons (order_item_id, name, price) VALUES (?, ?, ?)',
+        await db.query('INSERT INTO order_addons (order_item_id, name, price) VALUES ($1, $2, $3)',
           [orderItemId, addon.name, addon.price]);
       }
     }
   }
 
-  db.run('UPDATE tables SET status = ? WHERE id = ?', ['occupied', table_id]);
-  saveDatabase();
+  await db.query('UPDATE tables SET status = $1 WHERE id = $2', ['occupied', table_id]);
 
   const order = await getOrderById(orderId);
   res.status(201).json(order);
@@ -63,56 +62,42 @@ router.get('/', authenticate, async (req: AuthRequest, res) => {
     JOIN users u ON u.id = o.waiter_id
     WHERE 1=1`;
   const params: any[] = [];
+  let paramIndex = 1;
 
   if (req.user?.role === 'chef') {
     sql += " AND o.status IN ('pending','preparing','ready')";
   }
 
   if (status) {
-    sql += ' AND o.status = ?';
+    sql += ` AND o.status = $${paramIndex++}`;
     params.push(status);
   }
   if (table_id) {
-    sql += ' AND o.table_id = ?';
+    sql += ` AND o.table_id = $${paramIndex++}`;
     params.push(Number(table_id));
   }
   sql += ' ORDER BY o.created_at DESC';
 
-  const result = db.exec(sql, params);
-  const orders = result[0]?.values.map((row: any[]) => {
-    const order: any = {
-      id: row[0], table_id: row[1], table_number: row[2], waiter_id: row[3],
-      waiter_name: row[4], status: row[5], total: row[6], is_takeaway: !!row[7],
-      created_at: row[8], updated_at: row[9], items: []
-    };
-    return order;
-  }) || [];
+  const result = await db.query(sql, params);
+  const orders = result.rows;
 
   for (const order of orders) {
-    const itemsResult = db.exec(
+    const itemsResult = await db.query(
       `SELECT oi.id, oi.menu_item_id, mi.name, oi.quantity, oi.price, oi.notes, oi.status
        FROM order_items oi
        JOIN menu_items mi ON mi.id = oi.menu_item_id
-       WHERE oi.order_id = ?
+       WHERE oi.order_id = $1
        ORDER BY oi.id`,
       [order.id]
     );
-    order.items = itemsResult[0]?.values.map((row: any[]) => {
-      const item: any = {
-        id: row[0], menu_item_id: row[1], name: row[2],
-        quantity: row[3], price: row[4], notes: row[5], status: row[6], addons: []
-      };
-      return item;
-    }) || [];
+    order.items = itemsResult.rows;
 
     for (const item of order.items) {
-      const addonResult = db.exec(
-        'SELECT id, name, price FROM order_addons WHERE order_item_id = ?',
+      const addonResult = await db.query(
+        'SELECT id, name, price FROM order_addons WHERE order_item_id = $1',
         [item.id]
       );
-      item.addons = addonResult[0]?.values.map((row: any[]) => ({
-        id: row[0], name: row[1], price: row[2]
-      })) || [];
+      item.addons = addonResult.rows;
     }
   }
 
@@ -131,30 +116,29 @@ router.post('/:id/items', authenticate, authorize('waiter', 'owner'), async (req
   if (!items?.length) return res.status(400).json({ error: 'Items required' });
 
   const db = await getDatabase();
-  const orderResult = db.exec('SELECT status FROM orders WHERE id = ?', [id]);
-  if (!orderResult.length) return res.status(404).json({ error: 'Order not found' });
+  const orderResult = await db.query('SELECT status FROM orders WHERE id = $1', [id]);
+  if (!orderResult.rows.length) return res.status(404).json({ error: 'Order not found' });
 
   let addonTotal = 0;
   for (const item of items) {
     const itemAddons = (item.addons || []).reduce((a: number, ad: any) => a + ad.price, 0);
     addonTotal += itemAddons * item.quantity;
-    db.run(
-      'INSERT INTO order_items (order_id, menu_item_id, quantity, price, notes) VALUES (?, ?, ?, ?, ?)',
+    const itemResult = await db.query(
+      'INSERT INTO order_items (order_id, menu_item_id, quantity, price, notes) VALUES ($1, $2, $3, $4, $5) RETURNING id',
       [id, item.menu_item_id, item.quantity, item.price, item.notes || '']
     );
-    const orderItemId = db.exec("SELECT last_insert_rowid()")[0].values[0][0] as number;
+    const orderItemId = itemResult.rows[0].id;
     if (item.addons?.length) {
       for (const addon of item.addons) {
-        db.run('INSERT INTO order_addons (order_item_id, name, price) VALUES (?, ?, ?)',
+        await db.query('INSERT INTO order_addons (order_item_id, name, price) VALUES ($1, $2, $3)',
           [orderItemId, addon.name, addon.price]);
       }
     }
   }
 
   const itemTotal = items.reduce((s: number, i: OrderItemInput) => s + i.price * i.quantity, 0);
-  db.run('UPDATE orders SET total = total + ?, updated_at = datetime("now","localtime") WHERE id = ?',
+  await db.query('UPDATE orders SET total = total + $1, updated_at = NOW() WHERE id = $2',
     [itemTotal + addonTotal, id]);
-  saveDatabase();
 
   const order = await getOrderById(Number(id));
   res.json(order);
@@ -169,8 +153,7 @@ router.patch('/:id/status', authenticate, authorize('waiter', 'chef', 'owner'), 
   }
 
   const db = await getDatabase();
-  db.run('UPDATE orders SET status = ?, updated_at = datetime("now","localtime") WHERE id = ?', [status, id]);
-  saveDatabase();
+  await db.query('UPDATE orders SET status = $1, updated_at = NOW() WHERE id = $2', [status, id]);
 
   const order = await getOrderById(Number(id));
   res.json(order);
@@ -185,52 +168,40 @@ router.patch('/items/:itemId/status', authenticate, authorize('chef', 'owner'), 
   }
 
   const db = await getDatabase();
-  db.run('UPDATE order_items SET status = ? WHERE id = ?', [status, itemId]);
-  saveDatabase();
+  await db.query('UPDATE order_items SET status = $1 WHERE id = $2', [status, itemId]);
   res.json({ success: true });
 });
 
 async function getOrderById(orderId: number) {
   const db = await getDatabase();
-  const result = db.exec(
+  const result = await db.query(
     `SELECT o.id, o.table_id, t.number as table_number, o.waiter_id, u.name as waiter_name,
      o.status, o.total, o.is_takeaway, o.created_at, o.updated_at
      FROM orders o
      JOIN tables t ON t.id = o.table_id
      JOIN users u ON u.id = o.waiter_id
-     WHERE o.id = ?`,
+     WHERE o.id = $1`,
     [orderId]
   );
-  if (!result.length) return null;
+  if (!result.rows.length) return null;
 
-  const row = result[0].values[0] as any[];
-  const order: any = {
-    id: row[0], table_id: row[1], table_number: row[2], waiter_id: row[3],
-    waiter_name: row[4], status: row[5], total: row[6], is_takeaway: !!row[7],
-    created_at: row[8], updated_at: row[9], items: []
-  };
+  const order = result.rows[0];
 
-  const itemsResult = db.exec(
+  const itemsResult = await db.query(
     `SELECT oi.id, oi.menu_item_id, mi.name, oi.quantity, oi.price, oi.notes, oi.status
      FROM order_items oi
      JOIN menu_items mi ON mi.id = oi.menu_item_id
-     WHERE oi.order_id = ?
+     WHERE oi.order_id = $1
      ORDER BY oi.id`,
     [orderId]
   );
-  order.items = itemsResult[0]?.values.map((row: any[]) => {
-    const item: any = { id: row[0], menu_item_id: row[1], name: row[2],
-      quantity: row[3], price: row[4], notes: row[5], status: row[6], addons: [] };
-    return item;
-  }) || [];
+  order.items = itemsResult.rows;
 
   for (const item of order.items) {
-    const addonResult = db.exec(
-      'SELECT id, name, price FROM order_addons WHERE order_item_id = ?', [item.id]
+    const addonResult = await db.query(
+      'SELECT id, name, price FROM order_addons WHERE order_item_id = $1', [item.id]
     );
-    item.addons = addonResult[0]?.values.map((row: any[]) => ({
-      id: row[0], name: row[1], price: row[2]
-    })) || [];
+    item.addons = addonResult.rows;
   }
 
   return order;

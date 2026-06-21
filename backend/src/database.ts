@@ -1,132 +1,106 @@
-import initSqlJs, { Database as SqlJsDatabase } from 'sql.js';
-import fs from 'fs';
-import path from 'path';
+import { Pool, QueryResult } from 'pg';
 
-const DB_PATH = path.join(__dirname, '..', 'data', 'abs-cafe.db');
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/abs_cafe',
+});
 
-let db: SqlJsDatabase;
+let schemaInitialized = false;
 
-export async function getDatabase(): Promise<SqlJsDatabase> {
-  if (db) return db;
-
-  const SQL = await initSqlJs();
-  const dir = path.dirname(DB_PATH);
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-
-  if (fs.existsSync(DB_PATH)) {
-    const buffer = fs.readFileSync(DB_PATH);
-    db = new SQL.Database(buffer);
-  } else {
-    db = new SQL.Database();
+export async function getDatabase(): Promise<Pool> {
+  if (!schemaInitialized) {
+    await initializeSchema();
+    schemaInitialized = true;
   }
-
-  db.run('PRAGMA journal_mode=WAL');
-  db.run('PRAGMA foreign_keys=ON');
-
-  initializeSchema();
-  saveDatabase();
-  return db;
+  return pool;
 }
 
-function initializeSchema() {
-  db.run(`
+async function initializeSchema() {
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS users (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      id SERIAL PRIMARY KEY,
       name TEXT NOT NULL,
       email TEXT UNIQUE NOT NULL,
       password_hash TEXT NOT NULL,
       role TEXT NOT NULL CHECK(role IN ('owner','waiter','chef','cashier')),
-      created_at TEXT DEFAULT (datetime('now','localtime'))
+      created_at TIMESTAMPTZ DEFAULT NOW()
     )
   `);
 
-  db.run(`
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS tables (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      id SERIAL PRIMARY KEY,
       number INTEGER UNIQUE NOT NULL,
       status TEXT DEFAULT 'available' CHECK(status IN ('available','occupied'))
     )
   `);
 
-  db.run(`
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS categories (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      id SERIAL PRIMARY KEY,
       name TEXT NOT NULL,
       sort_order INTEGER DEFAULT 0
     )
   `);
 
-  db.run(`
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS menu_items (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      id SERIAL PRIMARY KEY,
       name TEXT NOT NULL,
       description TEXT DEFAULT '',
-      price REAL NOT NULL,
-      category_id INTEGER NOT NULL,
-      available INTEGER DEFAULT 1,
-      FOREIGN KEY (category_id) REFERENCES categories(id)
+      price DOUBLE PRECISION NOT NULL,
+      category_id INTEGER NOT NULL REFERENCES categories(id),
+      available BOOLEAN DEFAULT TRUE
     )
   `);
 
-  db.run(`
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS orders (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      table_id INTEGER NOT NULL,
-      waiter_id INTEGER NOT NULL,
+      id SERIAL PRIMARY KEY,
+      table_id INTEGER NOT NULL REFERENCES tables(id),
+      waiter_id INTEGER NOT NULL REFERENCES users(id),
       status TEXT DEFAULT 'pending' CHECK(status IN ('pending','preparing','ready','served','paid')),
-      total REAL DEFAULT 0,
-      is_takeaway INTEGER DEFAULT 0,
-      created_at TEXT DEFAULT (datetime('now','localtime')),
-      updated_at TEXT DEFAULT (datetime('now','localtime')),
-      FOREIGN KEY (table_id) REFERENCES tables(id),
-      FOREIGN KEY (waiter_id) REFERENCES users(id)
+      total DOUBLE PRECISION DEFAULT 0,
+      is_takeaway BOOLEAN DEFAULT FALSE,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
     )
   `);
 
-  db.run(`
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS order_items (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      order_id INTEGER NOT NULL,
-      menu_item_id INTEGER NOT NULL,
+      id SERIAL PRIMARY KEY,
+      order_id INTEGER NOT NULL REFERENCES orders(id),
+      menu_item_id INTEGER NOT NULL REFERENCES menu_items(id),
       quantity INTEGER NOT NULL DEFAULT 1,
-      price REAL NOT NULL,
+      price DOUBLE PRECISION NOT NULL,
       notes TEXT DEFAULT '',
-      status TEXT DEFAULT 'pending' CHECK(status IN ('pending','preparing','ready','served')),
-      FOREIGN KEY (order_id) REFERENCES orders(id),
-      FOREIGN KEY (menu_item_id) REFERENCES menu_items(id)
+      status TEXT DEFAULT 'pending' CHECK(status IN ('pending','preparing','ready','served'))
     )
   `);
 
-  db.run(`
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS order_addons (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      order_item_id INTEGER NOT NULL,
+      id SERIAL PRIMARY KEY,
+      order_item_id INTEGER NOT NULL REFERENCES order_items(id),
       name TEXT NOT NULL,
-      price REAL NOT NULL DEFAULT 0,
-      FOREIGN KEY (order_item_id) REFERENCES order_items(id)
+      price DOUBLE PRECISION NOT NULL DEFAULT 0
     )
   `);
 
-  db.run(`
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS payments (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      order_id INTEGER UNIQUE NOT NULL,
-      amount REAL NOT NULL,
+      id SERIAL PRIMARY KEY,
+      order_id INTEGER UNIQUE NOT NULL REFERENCES orders(id),
+      amount DOUBLE PRECISION NOT NULL,
       method TEXT CHECK(method IN ('cash','qr')),
-      paid_at TEXT DEFAULT (datetime('now','localtime')),
-      cashier_id INTEGER NOT NULL,
-      FOREIGN KEY (order_id) REFERENCES orders(id),
-      FOREIGN KEY (cashier_id) REFERENCES users(id)
+      paid_at TIMESTAMPTZ DEFAULT NOW(),
+      cashier_id INTEGER NOT NULL REFERENCES users(id)
     )
   `);
 }
 
-export function saveDatabase() {
-  const data = db.export();
-  const buffer = Buffer.from(data);
-  fs.writeFileSync(DB_PATH, buffer);
-}
+export function saveDatabase() {}
 
-export function closeDatabase() {
-  if (db) db.close();
+export async function closeDatabase() {
+  await pool.end();
 }

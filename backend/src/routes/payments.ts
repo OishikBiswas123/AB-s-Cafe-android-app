@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { getDatabase, saveDatabase } from '../database';
+import { getDatabase } from '../database';
 import { authenticate, authorize, AuthRequest } from '../middleware/auth';
 
 const router = Router();
@@ -13,31 +13,29 @@ router.post('/:orderId/pay', authenticate, authorize('cashier', 'owner'), async 
   }
 
   const db = await getDatabase();
-  const orderResult = db.exec(
-    'SELECT id, total, status FROM orders WHERE id = ?', [orderId]
+  const orderResult = await db.query(
+    'SELECT id, total, status FROM orders WHERE id = $1', [orderId]
   );
-  if (!orderResult.length) {
+  if (!orderResult.rows.length) {
     return res.status(404).json({ error: 'Order not found' });
   }
 
-  const [, total, status] = orderResult[0].values[0] as any[];
-  if (status === 'paid') {
+  const order = orderResult.rows[0];
+  if (order.status === 'paid') {
     return res.status(400).json({ error: 'Order already paid' });
   }
 
-  db.run('INSERT INTO payments (order_id, amount, method, cashier_id) VALUES (?, ?, ?, ?)',
-    [orderId, total, method, req.user!.id]);
+  await db.query('INSERT INTO payments (order_id, amount, method, cashier_id) VALUES ($1, $2, $3, $4)',
+    [orderId, order.total, method, req.user!.id]);
 
-  db.run('UPDATE orders SET status = ?, updated_at = datetime("now","localtime") WHERE id = ?',
+  await db.query('UPDATE orders SET status = $1, updated_at = NOW() WHERE id = $2',
     ['paid', orderId]);
 
-  const tableResult = db.exec('SELECT table_id FROM orders WHERE id = ?', [orderId]);
-  if (tableResult.length) {
-    const tableId = tableResult[0].values[0][0];
-    db.run('UPDATE tables SET status = ? WHERE id = ?', ['available', tableId]);
+  const tableResult = await db.query('SELECT table_id FROM orders WHERE id = $1', [orderId]);
+  if (tableResult.rows.length) {
+    const tableId = tableResult.rows[0].table_id;
+    await db.query('UPDATE tables SET status = $1 WHERE id = $2', ['available', tableId]);
   }
-
-  saveDatabase();
 
   res.json({ success: true, message: 'Payment successful, table released' });
 });

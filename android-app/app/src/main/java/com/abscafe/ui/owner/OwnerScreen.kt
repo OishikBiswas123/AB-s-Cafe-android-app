@@ -292,10 +292,11 @@ fun MenuManagementTab(menuRepo: MenuRepository, socketClient: SocketClient? = nu
                                                     }
                                                     socketClient?.emit("menu:updated", org.json.JSONObject().apply { put("itemId", item.id); put("available", newAvailable) })
                                                 } else {
-                                                    snackbarHostState.showSnackbar("Failed to update")
+                                                    val errBody = resp.errorBody()?.string() ?: "Unknown"
+                                                    snackbarHostState.showSnackbar("API error: ${resp.code()} - $errBody")
                                                 }
                                             } catch (e: Exception) {
-                                                snackbarHostState.showSnackbar("Failed to update")
+                                                snackbarHostState.showSnackbar("Exception: ${e.message}")
                                             }
                                         }
                                     }
