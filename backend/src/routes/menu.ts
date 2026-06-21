@@ -51,6 +51,17 @@ router.put('/items/:id', authenticate, authorize('owner', 'chef'), async (req, r
   res.json({ success: true });
 });
 
+router.patch('/items/:id/availability', authenticate, authorize('owner', 'chef'), async (req, res) => {
+  const { id } = req.params;
+  const { available } = req.body;
+  if (available === undefined) {
+    return res.status(400).json({ error: 'available field required' });
+  }
+  const db = await getDatabase();
+  await db.query('UPDATE menu_items SET available = $1 WHERE id = $2', [available, id]);
+  res.json({ success: true });
+});
+
 router.delete('/items/:id', authenticate, authorize('owner'), async (req, res) => {
   const { id } = req.params;
   const db = await getDatabase();

@@ -76,4 +76,7 @@ interface ApiService {
 
     @DELETE("api/admin/clear-data")
     suspend fun clearAllData(): Response<ApiResponse>
+
+    @PATCH("api/menu/items/{id}/availability")
+    suspend fun toggleMenuItemAvailability(@Path("id") id: Int, @Body body: Map<String, Any>): Response<ApiResponse>
 }

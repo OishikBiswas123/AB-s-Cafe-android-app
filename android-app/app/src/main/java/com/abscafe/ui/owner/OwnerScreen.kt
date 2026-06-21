@@ -278,13 +278,7 @@ fun MenuManagementTab(menuRepo: MenuRepository, socketClient: SocketClient? = nu
                                     onCheckedChange = { newAvailable ->
                                         scope.launch {
                                             try {
-                                                val resp = RetrofitClient.apiService.updateMenuItem(item.id, mapOf<String, Any>(
-                                                    "name" to item.name,
-                                                    "price" to item.price,
-                                                    "category_id" to item.categoryId,
-                                                    "description" to item.description,
-                                                    "available" to newAvailable
-                                                ))
+                                                val resp = RetrofitClient.apiService.toggleMenuItemAvailability(item.id, mapOf("available" to newAvailable))
                                                 if (resp.isSuccessful) {
                                                     menuItems = menuItems.map {
                                                         if (it.id == item.id) it.copy(available = newAvailable)
@@ -504,7 +498,7 @@ fun UserManagementTab() {
                                     Text(user.role.replaceFirstChar { it.uppercase() }, modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp), fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
                                 }
                             }
-                            if (user.role != "owner") {
+                            if (user.id > 4) {
                                 IconButton(onClick = {
                                     scope.launch {
                                         RetrofitClient.apiService.deleteUser(user.id)

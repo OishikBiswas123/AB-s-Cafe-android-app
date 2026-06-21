@@ -35,8 +35,12 @@ router.post('/users', authenticate, authorize('owner'), async (req, res) => {
 
 router.delete('/users/:id', authenticate, authorize('owner'), async (req, res) => {
   const { id } = req.params;
+  const userId = Number(id);
+  if (userId <= 4) {
+    return res.status(403).json({ error: 'Cannot delete default users' });
+  }
   const db = await getDatabase();
-  await db.query('DELETE FROM users WHERE id = $1 AND role != $2', [id, 'owner']);
+  await db.query('DELETE FROM users WHERE id = $1', [id]);
   res.json({ success: true });
 });
 
