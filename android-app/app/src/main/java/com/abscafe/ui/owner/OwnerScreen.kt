@@ -278,7 +278,16 @@ fun MenuManagementTab(menuRepo: MenuRepository, socketClient: SocketClient? = nu
                                     onCheckedChange = { newAvailable ->
                                         scope.launch {
                                             try {
-                                                val resp = RetrofitClient.apiService.toggleMenuItemAvailability(item.id, AvailabilityRequest(newAvailable))
+                                                val resp = RetrofitClient.apiService.updateMenuItem(
+                                                    item.id,
+                                                    MenuItemRequest(
+                                                        name = item.name,
+                                                        price = item.price,
+                                                        categoryId = item.categoryId,
+                                                        description = item.description,
+                                                        available = newAvailable
+                                                    )
+                                                )
                                                 if (resp.isSuccessful) {
                                                     menuItems = menuItems.map {
                                                         if (it.id == item.id) it.copy(available = newAvailable)
@@ -328,7 +337,13 @@ fun MenuManagementTab(menuRepo: MenuRepository, socketClient: SocketClient? = nu
                     Button(onClick = {
                         scope.launch {
                             try {
-                                val resp = RetrofitClient.apiService.createMenuItem(mapOf<String, Any>("name" to name, "price" to (price.toDoubleOrNull() ?: 0.0), "category_id" to catId))
+                                val resp = RetrofitClient.apiService.createMenuItem(
+                                    MenuItemRequest(
+                                        name = name,
+                                        price = price.toDoubleOrNull() ?: 0.0,
+                                        categoryId = catId
+                                    )
+                                )
                                 if (resp.isSuccessful) {
                                     showAddDialog = false
                                     load()

@@ -139,8 +139,12 @@ data class StatusUpdate(
     val status: String
 )
 
-data class AvailabilityRequest(
-    val available: Boolean
+data class MenuItemRequest(
+    val name: String,
+    val price: Double,
+    @SerializedName("category_id") val categoryId: Int,
+    val description: String = "",
+    val available: Boolean = true
 )
 
 data class CartItem(

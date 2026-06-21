@@ -324,7 +324,16 @@ fun ChefMenuManagementTab(snackbarHostState: SnackbarHostState, socketClient: co
                                 onCheckedChange = { newAvailable ->
                                     scope.launch {
                                         try {
-                                            val resp = RetrofitClient.apiService.toggleMenuItemAvailability(item.id, AvailabilityRequest(newAvailable))
+                                            val resp = RetrofitClient.apiService.updateMenuItem(
+                                                item.id,
+                                                MenuItemRequest(
+                                                    name = item.name,
+                                                    price = item.price,
+                                                    categoryId = item.categoryId,
+                                                    description = item.description,
+                                                    available = newAvailable
+                                                )
+                                            )
                                             if (resp.isSuccessful) {
                                                 menuItems = menuItems.map { if (it.id == item.id) it.copy(available = newAvailable) else it }
                                                 socketClient?.emit("menu:updated", org.json.JSONObject().apply { put("itemId", item.id); put("available", newAvailable) })
@@ -348,5 +357,3 @@ fun ChefMenuManagementTab(snackbarHostState: SnackbarHostState, socketClient: co
             }
         }
     }
-
-

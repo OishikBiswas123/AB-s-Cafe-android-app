@@ -27,10 +27,10 @@ interface ApiService {
     suspend fun getMenuItems(@Query("category_id") categoryId: Int? = null): Response<List<MenuItem>>
 
     @POST("api/menu/items")
-    suspend fun createMenuItem(@Body body: Map<String, Any>): Response<ApiResponse>
+    suspend fun createMenuItem(@Body body: MenuItemRequest): Response<ApiResponse>
 
     @PUT("api/menu/items/{id}")
-    suspend fun updateMenuItem(@Path("id") id: Int, @Body body: Map<String, Any>): Response<ApiResponse>
+    suspend fun updateMenuItem(@Path("id") id: Int, @Body body: MenuItemRequest): Response<ApiResponse>
 
     @DELETE("api/menu/items/{id}")
     suspend fun deleteMenuItem(@Path("id") id: Int): Response<ApiResponse>
@@ -76,7 +76,4 @@ interface ApiService {
 
     @DELETE("api/admin/clear-data")
     suspend fun clearAllData(): Response<ApiResponse>
-
-    @PATCH("api/menu/items/{id}/availability")
-    suspend fun toggleMenuItemAvailability(@Path("id") id: Int, @Body body: AvailabilityRequest): Response<ApiResponse>
 }
