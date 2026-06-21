@@ -1,7 +1,7 @@
 import bcrypt from 'bcryptjs';
 import { getDatabase } from './database';
 
-async function seed() {
+export async function seedDatabase() {
   const db = await getDatabase();
 
   const existingUsers = await db.query("SELECT COUNT(*) as count FROM users");
@@ -93,4 +93,4 @@ async function seed() {
   console.log('  Cashier: cashier@abscafe.com / staff123');
 }
 
-seed().catch(console.error);
+seedDatabase().catch(console.error);

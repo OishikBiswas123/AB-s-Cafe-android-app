@@ -3,6 +3,7 @@ import cors from 'cors';
 import http from 'http';
 import { Server as SocketServer } from 'socket.io';
 import { getDatabase, closeDatabase } from './database';
+import { seedDatabase } from './seed';
 import { setupSocket } from './socket/handler';
 import authRoutes from './routes/auth';
 import tableRoutes from './routes/tables';
@@ -38,7 +39,8 @@ setupSocket(io);
 const PORT = process.env.PORT || 3000;
 const HOST = process.env.HOST || '0.0.0.0';
 
-getDatabase().then(() => {
+getDatabase().then(async () => {
+  await seedDatabase();
   server.listen(Number(PORT), HOST, () => {
     console.log(`AB's Cafe backend running on http://${HOST}:${PORT}`);
     console.log(`WebSocket server ready`);
