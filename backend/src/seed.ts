@@ -14,11 +14,11 @@ export async function seedDatabase() {
   const staffHash = await bcrypt.hash('staff123', 10);
 
   await db.query(`INSERT INTO users (name, email, password_hash, role) VALUES
-    ($1, 'owner@abscafe.com', $2, 'owner'),
-    ($3, 'waiter@abscafe.com', $4, 'waiter'),
-    ($5, 'chef@abscafe.com', $6, 'chef'),
-    ($7, 'cashier@abscafe.com', $8, 'cashier')
-  `, [ownerHash, ownerHash, staffHash, staffHash, staffHash, staffHash, staffHash, staffHash]);
+    ('Owner', 'owner@abscafe.com', $1, 'owner'),
+    ('Waiter', 'waiter@abscafe.com', $2, 'waiter'),
+    ('Chef', 'chef@abscafe.com', $3, 'chef'),
+    ('Cashier', 'cashier@abscafe.com', $4, 'cashier')
+  `, [ownerHash, staffHash, staffHash, staffHash]);
 
   for (let i = 1; i <= 18; i++) {
     await db.query('INSERT INTO tables (number, status) VALUES ($1, $2)', [i, 'available']);
@@ -93,4 +93,7 @@ export async function seedDatabase() {
   console.log('  Cashier: cashier@abscafe.com / staff123');
 }
 
-seedDatabase().catch(console.error);
+// Self-execute if run directly (npx ts-node src/seed.ts)
+if (require.main === module) {
+  seedDatabase().catch(console.error);
+}
