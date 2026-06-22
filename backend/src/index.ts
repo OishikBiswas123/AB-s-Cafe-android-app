@@ -39,15 +39,15 @@ setupSocket(io);
 const PORT = process.env.PORT || 3000;
 const HOST = process.env.HOST || '0.0.0.0';
 
-getDatabase().then(async () => {
-  await seedDatabase();
-  server.listen(Number(PORT), HOST, () => {
-    console.log(`AB's Cafe backend running on http://${HOST}:${PORT}`);
-    console.log(`WebSocket server ready`);
-  });
-}).catch((err) => {
-  console.error('Failed to initialize database:', err);
-  process.exit(1);
+server.listen(Number(PORT), HOST, async () => {
+  console.log(`AB's Cafe backend running on http://${HOST}:${PORT}`);
+  try {
+    await getDatabase();
+    await seedDatabase();
+    console.log('Database initialized and seeded');
+  } catch (err) {
+    console.error('Database initialization failed:', err);
+  }
 });
 
 process.on('SIGINT', async () => {
