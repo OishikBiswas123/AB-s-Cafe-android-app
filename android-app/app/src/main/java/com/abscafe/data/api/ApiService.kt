@@ -56,6 +56,12 @@ interface ApiService {
     @PATCH("api/orders/items/{itemId}/status")
     suspend fun updateOrderItemStatus(@Path("itemId") itemId: Int, @Body body: StatusUpdate): Response<ApiResponse>
 
+    @DELETE("api/orders/items/{itemId}")
+    suspend fun deleteOrderItem(@Path("itemId") itemId: Int): Response<ApiResponse>
+
+    @POST("api/orders/{id}/split")
+    suspend fun splitOrder(@Path("id") id: Int, @Body body: SplitRequest): Response<SplitResponse>
+
     @POST("api/payments/{orderId}/pay")
     suspend fun payOrder(@Path("orderId") orderId: Int, @Body request: PaymentRequest): Response<PaymentResponse>
 

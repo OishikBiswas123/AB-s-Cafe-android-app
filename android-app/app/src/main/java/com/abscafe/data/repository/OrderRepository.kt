@@ -47,6 +47,26 @@ class OrderRepository {
         }
     }
 
+    suspend fun deleteItem(itemId: Int): Result<ApiResponse> {
+        return try {
+            val response = RetrofitClient.apiService.deleteOrderItem(itemId)
+            if (response.isSuccessful) Result.success(response.body()!!)
+            else Result.failure(Exception("Failed to delete item"))
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun splitOrder(orderId: Int, groups: List<List<Int>>): Result<SplitResponse> {
+        return try {
+            val response = RetrofitClient.apiService.splitOrder(orderId, SplitRequest(groups))
+            if (response.isSuccessful) Result.success(response.body()!!)
+            else Result.failure(Exception("Failed to split order"))
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
     suspend fun updateItemStatus(itemId: Int, status: String): Result<ApiResponse> {
         return try {
             val response = RetrofitClient.apiService.updateOrderItemStatus(itemId, StatusUpdate(status))

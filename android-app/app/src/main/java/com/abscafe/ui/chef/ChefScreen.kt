@@ -142,15 +142,15 @@ fun ChefScreen(
                         items(filteredOrders) { order ->
                             KitchenOrderCard(
                                 order = order,
-                                onUpdateOrderStatus = { status ->
+                                onUpdateItemStatus = { itemId, status ->
                                     scope.launch {
-                                        orderRepo.updateOrderStatus(order.id, status).onSuccess {
-                                            val json = JSONObject().apply {
-                                                put("order_id", order.id)
+                                        orderRepo.updateItemStatus(itemId, status).onSuccess {
+                                            socketClient.emit("order:update", JSONObject().apply {
+                                                put("item_id", itemId)
                                                 put("status", status)
+                                                put("order_id", order.id)
                                                 put("table_id", order.tableId)
-                                            }
-                                            socketClient.emit("order:status", json)
+                                            })
                                             loadOrders()
                                         }
                                     }
@@ -167,7 +167,7 @@ fun ChefScreen(
 @Composable
 fun KitchenOrderCard(
     order: Order,
-    onUpdateOrderStatus: (String) -> Unit
+    onUpdateItemStatus: (Int, String) -> Unit
 ) {
     val statusColor = when (order.status) {
         "pending" -> PendingColor
@@ -248,24 +248,27 @@ fun KitchenOrderCard(
                             }
                         )
                     }
+                    Spacer(modifier = Modifier.width(6.dp))
+                    when (item.status) {
+                        "pending" -> TextButton(
+                            onClick = { onUpdateItemStatus(item.id, "preparing") },
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                            colors = ButtonDefaults.textButtonColors(contentColor = PreparingColor)
+                        ) { Text("Start", fontWeight = FontWeight.Bold) }
+                        "preparing" -> TextButton(
+                            onClick = { onUpdateItemStatus(item.id, "ready") },
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                            colors = ButtonDefaults.textButtonColors(contentColor = ReadyColor)
+                        ) { Text("Ready", fontWeight = FontWeight.Bold) }
+                        "ready" -> Icon(
+                            Icons.Default.Check,
+                            contentDescription = "Done",
+                            tint = ReadyColor,
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
                 }
                 Spacer(modifier = Modifier.height(4.dp))
-            }
-
-            if (order.items.any { it.status != "ready" }) {
-                Spacer(modifier = Modifier.height(12.dp))
-                Button(
-                    onClick = { onUpdateOrderStatus("preparing") },
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.buttonColors(containerColor = PreparingColor)
-                ) { Text("Mark All Preparing", color = OnPrimary) }
-            } else if (order.status != "ready") {
-                Spacer(modifier = Modifier.height(12.dp))
-                Button(
-                    onClick = { onUpdateOrderStatus("ready") },
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.buttonColors(containerColor = ReadyColor)
-                ) { Text("Ready to Serve", color = OnPrimary) }
             }
         }
     }

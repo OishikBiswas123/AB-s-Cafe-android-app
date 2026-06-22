@@ -59,7 +59,7 @@ async function initializeSchema() {
       id SERIAL PRIMARY KEY,
       table_id INTEGER NOT NULL REFERENCES tables(id),
       waiter_id INTEGER NOT NULL REFERENCES users(id),
-      status TEXT DEFAULT 'pending' CHECK(status IN ('pending','preparing','ready','served','paid')),
+      status TEXT DEFAULT 'pending',
       total DOUBLE PRECISION DEFAULT 0,
       is_takeaway BOOLEAN DEFAULT FALSE,
       created_at TIMESTAMPTZ DEFAULT NOW(),
@@ -75,7 +75,7 @@ async function initializeSchema() {
       quantity INTEGER NOT NULL DEFAULT 1,
       price DOUBLE PRECISION NOT NULL,
       notes TEXT DEFAULT '',
-      status TEXT DEFAULT 'pending' CHECK(status IN ('pending','preparing','ready','served'))
+      status TEXT DEFAULT 'pending'
     )
   `);
 
@@ -87,6 +87,14 @@ async function initializeSchema() {
       price DOUBLE PRECISION NOT NULL DEFAULT 0
     )
   `);
+
+  // Add cascade deletes and status constraints after table creation
+  try { await pool.query(`ALTER TABLE order_addons DROP CONSTRAINT IF EXISTS order_addons_order_item_id_fkey`); } catch {}
+  try { await pool.query(`ALTER TABLE order_addons ADD CONSTRAINT order_addons_order_item_id_fkey FOREIGN KEY (order_item_id) REFERENCES order_items(id) ON DELETE CASCADE`); } catch {}
+  try { await pool.query(`ALTER TABLE orders DROP CONSTRAINT IF EXISTS orders_status_check`); } catch {}
+  try { await pool.query(`ALTER TABLE orders ADD CONSTRAINT orders_status_check CHECK (status IN ('pending','preparing','ready','served','paid','void'))`); } catch {}
+  try { await pool.query(`ALTER TABLE order_items DROP CONSTRAINT IF EXISTS order_items_status_check`); } catch {}
+  try { await pool.query(`ALTER TABLE order_items ADD CONSTRAINT order_items_status_check CHECK (status IN ('pending','preparing','ready','served'))`); } catch {}
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS payments (

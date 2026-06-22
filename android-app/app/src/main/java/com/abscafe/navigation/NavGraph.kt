@@ -90,7 +90,7 @@ fun AppNavGraph(
         composable(Routes.CASHIER) {
             CashierScreen(
                 orderRepo = orderRepo,
-                tableRepo = tableRepo,
+                menuRepo = menuRepo,
                 socketClient = socketClient,
                 onLogout = {
                     CoroutineScope(Dispatchers.Main).launch { tokenManager.clear() }

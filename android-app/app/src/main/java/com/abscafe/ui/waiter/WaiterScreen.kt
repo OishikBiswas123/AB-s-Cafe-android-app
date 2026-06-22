@@ -61,6 +61,8 @@ fun WaiterScreen(
     var showAddItemMenu by remember { mutableStateOf(false) }
     var addItemCart by remember { mutableStateOf<List<CartItem>>(emptyList()) }
     var showLogoutDialog by remember { mutableStateOf(false) }
+    var showOrderDetail by remember { mutableStateOf(false) }
+    var selectedOrderForView by remember { mutableStateOf<Order?>(null) }
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
 
@@ -95,6 +97,30 @@ fun WaiterScreen(
             text = { Text("Are you sure you want to logout?") },
             confirmButton = { Button(onClick = { showLogoutDialog = false; onLogout() }) { Text("Yes") } },
             dismissButton = { TextButton(onClick = { showLogoutDialog = false }) { Text("No") } }
+        )
+    }
+
+    if (showOrderDetail && selectedOrderForView != null) {
+        OrderDetailDialog(
+            order = selectedOrderForView!!,
+            onServeItem = { itemId ->
+                scope.launch {
+                    orderRepo.updateItemStatus(itemId, "served").onSuccess {
+                        socketClient.emit("order:update", JSONObject().apply {
+                            put("item_id", itemId)
+                            put("status", "served")
+                            put("order_id", selectedOrderForView!!.id)
+                            put("table_id", selectedOrderForView!!.tableId)
+                        })
+                        loadData()
+                        showOrderDetail = false
+                        selectedOrderForView = null
+                    }.onFailure {
+                        snackbarHostState.showSnackbar("Failed to mark item as served")
+                    }
+                }
+            },
+            onDismiss = { showOrderDetail = false; selectedOrderForView = null }
         )
     }
 
@@ -217,6 +243,10 @@ fun WaiterScreen(
                         addItemCart = emptyList()
                         addItemMode = true
                     },
+                    onViewOrder = { order ->
+                        selectedOrderForView = order
+                        showOrderDetail = true
+                    },
                     onRefresh = { loadData() }
                 )
 
@@ -246,6 +276,7 @@ fun TablesScreen(
     loading: Boolean,
     onTableSelect: (Table) -> Unit,
     onAddItems: (Order) -> Unit,
+    onViewOrder: (Order) -> Unit,
     onRefresh: () -> Unit
 ) {
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
@@ -276,7 +307,8 @@ fun TablesScreen(
                         isOccupied = isOccupied,
                         order = order,
                         onClick = { if (!isOccupied) onTableSelect(table) },
-                        onAddItems = { if (order != null) onAddItems(order) }
+                        onAddItems = { if (order != null) onAddItems(order) },
+                        onViewOrder = { if (order != null) onViewOrder(order) }
                     )
                 }
             }
@@ -290,7 +322,8 @@ fun TableCard(
     isOccupied: Boolean,
     order: Order?,
     onClick: () -> Unit,
-    onAddItems: () -> Unit
+    onAddItems: () -> Unit,
+    onViewOrder: () -> Unit
 ) {
     Card(
         modifier = Modifier
@@ -339,14 +372,35 @@ fun TableCard(
                         color = statusColor
                     )
                 }
-                Spacer(modifier = Modifier.height(4.dp))
+                Spacer(modifier = Modifier.height(2.dp))
+                val servedCount = order.items.count { it.status == "served" }
+                val readyCount = order.items.count { it.status == "ready" }
+                val totalItems = order.items.size
+                if (totalItems > 0) {
+                    Text(
+                        "$servedCount/$totalItems served · $readyCount ready",
+                        fontSize = 10.sp,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                    )
+                }
+                Spacer(modifier = Modifier.height(2.dp))
                 Text("₹${order.total}", fontWeight = FontWeight.Bold, fontSize = 14.sp)
                 Spacer(modifier = Modifier.height(4.dp))
-                FilledTonalButton(
-                    onClick = onAddItems,
+                Row(
                     modifier = Modifier.fillMaxWidth(),
-                    contentPadding = PaddingValues(vertical = 4.dp)
-                ) { Text("+ Items", fontSize = 11.sp) }
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = onViewOrder,
+                        modifier = Modifier.weight(1f),
+                        contentPadding = PaddingValues(vertical = 4.dp)
+                    ) { Text("View", fontSize = 11.sp) }
+                    FilledTonalButton(
+                        onClick = onAddItems,
+                        modifier = Modifier.weight(1f),
+                        contentPadding = PaddingValues(vertical = 4.dp)
+                    ) { Text("+ Items", fontSize = 11.sp) }
+                }
             }
         }
     }
@@ -640,4 +694,66 @@ fun AddItemMenuScreen(
             }
         }
     }
+}
+
+@Composable
+fun OrderDetailDialog(
+    order: Order,
+    onServeItem: (Int) -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Order #${order.id} - Table ${order.tableNumber}") },
+        text = {
+            Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                if (order.isTakeaway) {
+                    Text("Takeaway", fontSize = 13.sp, color = MaterialTheme.colorScheme.primary)
+                    Spacer(modifier = Modifier.height(8.dp))
+                }
+                order.items.forEach { item ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("${item.quantity}x ${item.name}", fontWeight = FontWeight.Medium, fontSize = 14.sp)
+                            if (item.addons.isNotEmpty()) {
+                                Text(item.addons.joinToString(", ") { it.name }, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
+                            }
+                        }
+                        when (item.status) {
+                            "ready" -> TextButton(
+                                onClick = { onServeItem(item.id) },
+                                colors = ButtonDefaults.textButtonColors(contentColor = ReadyColor)
+                            ) { Text("Serve", fontWeight = FontWeight.Bold) }
+                            "served" -> Icon(Icons.Default.Check, "Served", tint = ReadyColor, modifier = Modifier.size(20.dp))
+                            else -> {
+                                val color = when (item.status) {
+                                    "pending" -> PendingColor
+                                    "preparing" -> PreparingColor
+                                    else -> Available
+                                }
+                                Surface(color = color.copy(alpha = 0.2f), shape = MaterialTheme.shapes.small) {
+                                    Text(
+                                        item.status.replaceFirstChar { it.uppercase() },
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                                        fontSize = 11.sp,
+                                        color = color
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    if (item.notes.isNotBlank()) {
+                        Text("Note: ${item.notes}", fontSize = 11.sp, color = MaterialTheme.colorScheme.error.copy(alpha = 0.7f), modifier = Modifier.padding(start = 8.dp))
+                    }
+                    Spacer(modifier = Modifier.height(4.dp))
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+                Text("Total: ₹${order.total}", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } }
+    )
 }

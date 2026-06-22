@@ -139,6 +139,15 @@ data class StatusUpdate(
     val status: String
 )
 
+data class SplitRequest(
+    val groups: List<List<Int>>
+)
+
+data class SplitResponse(
+    val success: Boolean,
+    val orders: List<Order>
+)
+
 data class MenuItemRequest(
     val name: String,
     val price: Double,
