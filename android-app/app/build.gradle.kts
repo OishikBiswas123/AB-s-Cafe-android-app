@@ -14,7 +14,7 @@ android {
         versionCode = 1
         versionName = "1.0"
 
-        buildConfigField("String", "BASE_URL", "\"https://fa12f4b9-8866-46f8-a13c-b33cf8f3d9a8-00-37fhd5e5aljbi.pike.replit.dev/\"")
+        buildConfigField("String", "BASE_URL", "\"https://ab-s-cafe-android-app-afc3.onbelmo.uk/\"")
     }
 
     buildFeatures {
