@@ -5,12 +5,12 @@ import com.abscafe.data.model.*
 
 class OrderRepository {
 
-    suspend fun createOrder(tableId: Int, items: List<OrderItemInput>, isTakeaway: Boolean = false): Result<Order> {
+    suspend fun createOrder(tableId: Int, items: List<OrderItemInput>, isTakeaway: Boolean = false): Result<List<Order>> {
         return try {
             val response = RetrofitClient.apiService.createOrder(
                 CreateOrderRequest(tableId, items, isTakeaway)
             )
-            if (response.isSuccessful) Result.success(response.body()!!)
+            if (response.isSuccessful) Result.success(response.body()!!.orders)
             else Result.failure(Exception("Failed to create order"))
         } catch (e: Exception) {
             Result.failure(e)

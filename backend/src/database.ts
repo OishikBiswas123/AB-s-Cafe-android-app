@@ -102,6 +102,9 @@ async function initializeSchema() {
   try { await pool.query(`ALTER TABLE menu_items ADD COLUMN IF NOT EXISTS type TEXT DEFAULT 'food'`); } catch {}
   try { await pool.query(`ALTER TABLE menu_items DROP CONSTRAINT IF EXISTS menu_items_type_check`); } catch {}
   try { await pool.query(`ALTER TABLE menu_items ADD CONSTRAINT menu_items_type_check CHECK (type IN ('food','beverage'))`); } catch {}
+  // Fix existing items: categories 1 (Tea & Coffee) and 7 (Cold Drinks) should be beverage
+  try { await pool.query(`UPDATE menu_items SET type = 'beverage' WHERE category_id IN (1, 7) AND type != 'beverage'`); } catch {}
+  try { await pool.query(`UPDATE menu_items SET type = 'food' WHERE category_id NOT IN (1, 7) AND type != 'food'`); } catch {}
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS payments (

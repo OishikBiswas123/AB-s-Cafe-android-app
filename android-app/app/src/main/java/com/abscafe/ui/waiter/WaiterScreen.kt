@@ -62,7 +62,7 @@ fun WaiterScreen(
     var addItemCart by remember { mutableStateOf<List<CartItem>>(emptyList()) }
     var showLogoutDialog by remember { mutableStateOf(false) }
     var showOrderDetail by remember { mutableStateOf(false) }
-    var selectedOrderForView by remember { mutableStateOf<Order?>(null) }
+    var selectedOrdersForView by remember { mutableStateOf<List<Order>>(emptyList()) }
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
 
@@ -100,27 +100,32 @@ fun WaiterScreen(
         )
     }
 
-    if (showOrderDetail && selectedOrderForView != null) {
+    if (showOrderDetail && selectedOrdersForView.isNotEmpty()) {
+        val allItems = selectedOrdersForView.flatMap { order ->
+            order.items.map { item -> item to order }
+        }
         OrderDetailDialog(
-            order = selectedOrderForView!!,
+            orders = selectedOrdersForView,
+            allItems = allItems,
             onServeItem = { itemId ->
                 scope.launch {
                     orderRepo.updateItemStatus(itemId, "served").onSuccess {
+                        val orderId = allItems.find { it.first.id == itemId }?.second?.id ?: 0
                         socketClient.emit("order:update", JSONObject().apply {
                             put("item_id", itemId)
                             put("status", "served")
-                            put("order_id", selectedOrderForView!!.id)
-                            put("table_id", selectedOrderForView!!.tableId)
+                            put("order_id", orderId)
+                            put("table_id", selectedOrdersForView.first().tableId)
                         })
                         loadData()
                         showOrderDetail = false
-                        selectedOrderForView = null
+                        selectedOrdersForView = emptyList()
                     }.onFailure {
                         snackbarHostState.showSnackbar("Failed to mark item as served")
                     }
                 }
             },
-            onDismiss = { showOrderDetail = false; selectedOrderForView = null }
+            onDismiss = { showOrderDetail = false; selectedOrdersForView = emptyList() }
         )
     }
 
@@ -231,15 +236,14 @@ fun WaiterScreen(
                     onPlaceOrder = {
                         scope.launch {
                             val items = cart.map { it.toOrderItemInput() }
-                            orderRepo.createOrder(selectedTable!!.id, items, isTakeaway).onSuccess { order ->
+                            orderRepo.createOrder(selectedTable!!.id, items, isTakeaway).onSuccess { orders ->
                                 val json = JSONObject().apply {
-                                    put("order_id", order.id)
-                                    put("table_id", order.tableId)
+                                    put("table_id", selectedTable!!.id)
                                     put("table_number", selectedTable?.number)
                                     put("items", JSONArray())
                                 }
                                 socketClient.emit("order:place", json)
-                                snackbarHostState.showSnackbar("Order placed!")
+                                snackbarHostState.showSnackbar("Order placed! (${orders.size} orders)")
                                 showCart = false; cart = emptyList(); isTakeaway = false
                                 currentScreen = "tables"
                                 loadData()
@@ -264,8 +268,8 @@ fun WaiterScreen(
                         updatedItemQtys = emptyMap()
                         editOrderMode = true
                     },
-                    onViewOrder = { order ->
-                        selectedOrderForView = order
+                    onViewOrder = { orders ->
+                        selectedOrdersForView = orders
                         showOrderDetail = true
                     },
                     onRefresh = { loadData() }
@@ -297,7 +301,7 @@ fun TablesScreen(
     loading: Boolean,
     onTableSelect: (Table) -> Unit,
     onEditOrder: (Order) -> Unit,
-    onViewOrder: (Order) -> Unit,
+    onViewOrder: (List<Order>) -> Unit,
     onRefresh: () -> Unit
 ) {
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
@@ -321,15 +325,15 @@ fun TablesScreen(
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 items(tables) { table ->
-                    val order = activeOrders.find { it.tableId == table.id && it.status != "paid" }
-                    val isOccupied = table.status == "occupied"
+                    val tableOrders = activeOrders.filter { it.tableId == table.id && it.status != "paid" }
+                    val isOccupied = table.status == "occupied" || tableOrders.isNotEmpty()
                     TableCard(
                         table = table,
                         isOccupied = isOccupied,
-                        order = order,
+                        orders = tableOrders,
                         onClick = { if (!isOccupied) onTableSelect(table) },
-                        onEditOrder = { if (order != null) onEditOrder(order) },
-                        onViewOrder = { if (order != null) onViewOrder(order) }
+                        onEditOrder = { if (tableOrders.isNotEmpty()) onEditOrder(tableOrders.first()) },
+                        onViewOrder = { if (tableOrders.isNotEmpty()) onViewOrder(tableOrders) }
                     )
                 }
             }
@@ -341,11 +345,18 @@ fun TablesScreen(
 fun TableCard(
     table: Table,
     isOccupied: Boolean,
-    order: Order?,
+    orders: List<Order>,
     onClick: () -> Unit,
     onEditOrder: () -> Unit,
     onViewOrder: () -> Unit
 ) {
+    val totalOrders = orders.size
+    val allItems = orders.flatMap { it.items }
+    val servedCount = allItems.count { it.status == "served" }
+    val readyCount = allItems.count { it.status == "ready" }
+    val totalItems = allItems.size
+    val grandTotal = orders.sumOf { it.total }
+
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -373,30 +384,11 @@ fun TableCard(
                 fontSize = 12.sp,
                 color = if (isOccupied) Occupied else Available
             )
-            if (isOccupied && order != null) {
-                Spacer(modifier = Modifier.height(4.dp))
-                val statusColor = when (order.status) {
-                    "pending" -> PendingColor
-                    "preparing" -> PreparingColor
-                    "ready" -> ReadyColor
-                    else -> Available
-                }
-                Surface(
-                    color = statusColor.copy(alpha = 0.2f),
-                    shape = MaterialTheme.shapes.small
-                ) {
-                    Text(
-                        order.status.replaceFirstChar { it.uppercase() },
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = statusColor
-                    )
-                }
+            if (isOccupied) {
                 Spacer(modifier = Modifier.height(2.dp))
-                val servedCount = order.items.count { it.status == "served" }
-                val readyCount = order.items.count { it.status == "ready" }
-                val totalItems = order.items.size
+                if (totalOrders > 1) {
+                    Text("$totalOrders orders", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
+                }
                 if (totalItems > 0) {
                     Text(
                         "$servedCount/$totalItems served · $readyCount ready",
@@ -404,8 +396,7 @@ fun TableCard(
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
                     )
                 }
-                Spacer(modifier = Modifier.height(2.dp))
-                Text("₹${order.total}", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                Text("₹${grandTotal}", fontWeight = FontWeight.Bold, fontSize = 14.sp)
                 Spacer(modifier = Modifier.height(4.dp))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -719,20 +710,25 @@ fun AddItemMenuScreen(
 
 @Composable
 fun OrderDetailDialog(
-    order: Order,
+    orders: List<Order>,
+    allItems: List<Pair<OrderItem, Order>>,
     onServeItem: (Int) -> Unit,
     onDismiss: () -> Unit
 ) {
+    val tableNumber = orders.firstOrNull()?.tableNumber ?: 0
+    val grandTotal = orders.sumOf { it.total }
+    val hasTakeaway = orders.any { it.isTakeaway }
+
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Order #${order.id} - Table ${order.tableNumber}") },
+        title = { Text("Table ${tableNumber} (${orders.size} order${if (orders.size > 1) "s" else ""})") },
         text = {
             Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
-                if (order.isTakeaway) {
+                if (hasTakeaway) {
                     Text("Takeaway", fontSize = 13.sp, color = MaterialTheme.colorScheme.primary)
                     Spacer(modifier = Modifier.height(8.dp))
                 }
-                order.items.forEach { item ->
+                allItems.forEach { (item, _) ->
                     Row(
                         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically
@@ -772,7 +768,7 @@ fun OrderDetailDialog(
                     Spacer(modifier = Modifier.height(4.dp))
                 }
                 Spacer(modifier = Modifier.height(8.dp))
-                Text("Total: ₹${order.total}", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                Text("Total: ₹${grandTotal}", fontWeight = FontWeight.Bold, fontSize = 16.sp)
             }
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } }

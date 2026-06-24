@@ -143,6 +143,11 @@ data class SplitRequest(
     val groups: List<List<Int>>
 )
 
+data class CreateOrderResponse(
+    val success: Boolean,
+    val orders: List<Order>
+)
+
 data class SplitResponse(
     val success: Boolean,
     val orders: List<Order>

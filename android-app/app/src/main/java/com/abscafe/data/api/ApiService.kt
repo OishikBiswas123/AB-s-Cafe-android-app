@@ -36,7 +36,7 @@ interface ApiService {
     suspend fun deleteMenuItem(@Path("id") id: Int): Response<ApiResponse>
 
     @POST("api/orders")
-    suspend fun createOrder(@Body request: CreateOrderRequest): Response<Order>
+    suspend fun createOrder(@Body request: CreateOrderRequest): Response<CreateOrderResponse>
 
     @GET("api/orders")
     suspend fun getOrders(
