@@ -1,4 +1,5 @@
 import { Pool, QueryResult } from 'pg';
+import bcrypt from 'bcryptjs';
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/abs_cafe',
@@ -22,7 +23,7 @@ async function initializeSchema() {
       name TEXT NOT NULL,
       email TEXT UNIQUE NOT NULL,
       password_hash TEXT NOT NULL,
-      role TEXT NOT NULL CHECK(role IN ('owner','waiter','chef','cashier')),
+      role TEXT NOT NULL CHECK(role IN ('owner','waiter','chef','cashier','drinks_chef')),
       created_at TIMESTAMPTZ DEFAULT NOW()
     )
   `);
@@ -112,6 +113,14 @@ async function initializeSchema() {
       cashier_id INTEGER NOT NULL REFERENCES users(id)
     )
   `);
+
+  // Ensure drinks chef user exists (for existing databases that were seeded before this role was added)
+  const drinksHash = await bcrypt.hash('staff123', 10);
+  await pool.query(`
+    INSERT INTO users (name, email, password_hash, role)
+    SELECT 'Drinks Chef', 'drinks@abscafe.com', $1, 'drinks_chef'
+    WHERE NOT EXISTS (SELECT 1 FROM users WHERE email = 'drinks@abscafe.com')
+  `, [drinksHash]);
 }
 
 export function saveDatabase() {}
