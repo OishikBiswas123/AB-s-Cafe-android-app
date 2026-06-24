@@ -50,7 +50,8 @@ async function initializeSchema() {
       description TEXT DEFAULT '',
       price DOUBLE PRECISION NOT NULL,
       category_id INTEGER NOT NULL REFERENCES categories(id),
-      available BOOLEAN DEFAULT TRUE
+      available BOOLEAN DEFAULT TRUE,
+      type TEXT DEFAULT 'food'
     )
   `);
 
@@ -88,13 +89,18 @@ async function initializeSchema() {
     )
   `);
 
-  // Add cascade deletes and status constraints after table creation
+  // Add cascade deletes and status/type constraints after table creation
   try { await pool.query(`ALTER TABLE order_addons DROP CONSTRAINT IF EXISTS order_addons_order_item_id_fkey`); } catch {}
   try { await pool.query(`ALTER TABLE order_addons ADD CONSTRAINT order_addons_order_item_id_fkey FOREIGN KEY (order_item_id) REFERENCES order_items(id) ON DELETE CASCADE`); } catch {}
   try { await pool.query(`ALTER TABLE orders DROP CONSTRAINT IF EXISTS orders_status_check`); } catch {}
   try { await pool.query(`ALTER TABLE orders ADD CONSTRAINT orders_status_check CHECK (status IN ('pending','preparing','ready','served','paid','void'))`); } catch {}
   try { await pool.query(`ALTER TABLE order_items DROP CONSTRAINT IF EXISTS order_items_status_check`); } catch {}
   try { await pool.query(`ALTER TABLE order_items ADD CONSTRAINT order_items_status_check CHECK (status IN ('pending','preparing','ready','served'))`); } catch {}
+  try { await pool.query(`ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check`); } catch {}
+  try { await pool.query(`ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ('owner','waiter','chef','cashier','drinks_chef'))`); } catch {}
+  try { await pool.query(`ALTER TABLE menu_items ADD COLUMN IF NOT EXISTS type TEXT DEFAULT 'food'`); } catch {}
+  try { await pool.query(`ALTER TABLE menu_items DROP CONSTRAINT IF EXISTS menu_items_type_check`); } catch {}
+  try { await pool.query(`ALTER TABLE menu_items ADD CONSTRAINT menu_items_type_check CHECK (type IN ('food','beverage'))`); } catch {}
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS payments (

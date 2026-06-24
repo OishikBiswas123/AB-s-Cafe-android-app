@@ -513,7 +513,7 @@ fun UserManagementTab() {
                                     Text(user.role.replaceFirstChar { it.uppercase() }, modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp), fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
                                 }
                             }
-                            val isDefaultUser = user.email in listOf("owner@abscafe.com", "waiter@abscafe.com", "chef@abscafe.com", "cashier@abscafe.com")
+                            val isDefaultUser = user.email in listOf("owner@abscafe.com", "waiter@abscafe.com", "chef@abscafe.com", "cashier@abscafe.com", "drinks@abscafe.com")
                             if (!isDefaultUser) {
                                 var showDeleteConfirm by remember { mutableStateOf(false) }
                                 IconButton(onClick = { showDeleteConfirm = true }) { Icon(Icons.Default.Delete, "Delete", tint = MaterialTheme.colorScheme.error) }

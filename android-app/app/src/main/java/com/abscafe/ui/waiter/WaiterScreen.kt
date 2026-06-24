@@ -56,9 +56,9 @@ fun WaiterScreen(
     var loading by remember { mutableStateOf(false) }
     var isTakeaway by remember { mutableStateOf(false) }
     var showCart by remember { mutableStateOf(false) }
-    var addItemMode by remember { mutableStateOf(false) }
+    var editOrderMode by remember { mutableStateOf(false) }
     var selectedOrderForAdd by remember { mutableStateOf<Order?>(null) }
-    var showAddItemMenu by remember { mutableStateOf(false) }
+    var removedItemIds by remember { mutableStateOf<Set<Int>>(emptySet()) }
     var addItemCart by remember { mutableStateOf<List<CartItem>>(emptyList()) }
     var showLogoutDialog by remember { mutableStateOf(false) }
     var showOrderDetail by remember { mutableStateOf(false) }
@@ -130,7 +130,7 @@ fun WaiterScreen(
                 title = {
                     Text(
                         when {
-                            addItemMode -> "Add Items - Table ${selectedOrderForAdd?.tableNumber}"
+                            editOrderMode -> "Edit Order - Table ${selectedOrderForAdd?.tableNumber}"
                             showCart -> "Cart - Table ${selectedTable?.number}"
                             currentScreen == "tables" -> "AB's Cafe"
                             else -> "Table ${selectedTable?.number}"
@@ -138,9 +138,9 @@ fun WaiterScreen(
                     )
                 },
                 navigationIcon = {
-                    if (currentScreen != "tables" || showCart || addItemMode) {
+                    if (currentScreen != "tables" || showCart || editOrderMode) {
                         IconButton(onClick = {
-                            if (addItemMode) { addItemMode = false; showAddItemMenu = false; addItemCart = emptyList() }
+                            if (editOrderMode) { editOrderMode = false; addItemCart = emptyList(); removedItemIds = emptySet() }
                             else if (showCart) { showCart = false; cart = emptyList() }
                             else if (currentScreen == "menu") { currentScreen = "tables" }
                         }) { Icon(Icons.Default.ArrowBack, "Back") }
@@ -163,39 +163,46 @@ fun WaiterScreen(
     ) { padding ->
         Box(modifier = Modifier.fillMaxSize().padding(padding)) {
             when {
-                addItemMode -> AddItemMenuScreen(
-                    categories = categories,
-                    menuItems = menuItems,
-                    selectedCategory = selectedCategory,
-                    cart = addItemCart,
-                    onSelectCategory = { selectedCategory = it },
-                    onQuantityChange = { item, delta ->
-                        addItemCart = addItemCart.mapNotNull { if (it.menuItem.id == item.id) { val nq = it.quantity + delta; if (nq <= 0) null else it.copy(quantity = nq) } else it }
-                        if (addItemCart.none { it.menuItem.id == item.id }) {
-                            addItemCart = addItemCart + CartItem(item)
-                        }
-                    },
-                    onAddCheese = { item ->
-                        addItemCart = addItemCart.map { if (it.menuItem.id == item.id) it.copy(addExtraCheese = !it.addExtraCheese) else it }
-                    },
-                    onSubmit = {
-                        scope.launch {
-                            val items = addItemCart.map { it.toOrderItemInput() }
-                            orderRepo.addItems(selectedOrderForAdd!!.id, items).onSuccess { order ->
-                                val json = JSONObject().apply {
-                                    put("order_id", order.id)
-                                    put("table_id", order.tableId)
-                                    put("items", JSONArray())
+                editOrderMode -> {
+                    val orderItems = selectedOrderForAdd?.items ?: emptyList()
+                    EditOrderScreen(
+                        existingItems = orderItems,
+                        categories = categories,
+                        menuItems = menuItems,
+                        selectedCategory = selectedCategory,
+                        addItemCart = addItemCart,
+                        removedItemIds = removedItemIds,
+                        onSelectCategory = { selectedCategory = it },
+                        onQuantityChange = { item, delta ->
+                            addItemCart = addItemCart.mapNotNull { if (it.menuItem.id == item.id) { val nq = it.quantity + delta; if (nq <= 0) null else it.copy(quantity = nq) } else it }
+                            if (addItemCart.none { it.menuItem.id == item.id }) {
+                                addItemCart = addItemCart + CartItem(item)
+                            }
+                        },
+                        onRemoveExistingItem = { itemId ->
+                            removedItemIds = if (itemId in removedItemIds) removedItemIds - itemId else removedItemIds + itemId
+                        },
+                        onSubmit = {
+                            scope.launch {
+                                for (itemId in removedItemIds) {
+                                    orderRepo.deleteItem(itemId)
                                 }
-                                socketClient.emit("order:add-items", json)
-                                snackbarHostState.showSnackbar("Items added!")
-                                addItemMode = false; addItemCart = emptyList(); showAddItemMenu = false
+                                if (addItemCart.isNotEmpty()) {
+                                    val items = addItemCart.map { it.toOrderItemInput() }
+                                    orderRepo.addItems(selectedOrderForAdd!!.id, items)
+                                }
+                                socketClient.emit("order:update", JSONObject().apply {
+                                    put("order_id", selectedOrderForAdd!!.id)
+                                    put("table_id", selectedOrderForAdd!!.tableId)
+                                })
+                                snackbarHostState.showSnackbar("Order updated!")
+                                editOrderMode = false; addItemCart = emptyList(); removedItemIds = emptySet()
                                 loadData()
-                            }.onFailure { snackbarHostState.showSnackbar("Failed to add items") }
-                        }
-                    },
-                    onCancel = { addItemMode = false; addItemCart = emptyList() }
-                )
+                            }
+                        },
+                        onCancel = { editOrderMode = false; addItemCart = emptyList(); removedItemIds = emptySet() }
+                    )
+                }
 
                 showCart -> CartScreen(
                     cart = cart,
@@ -237,11 +244,12 @@ fun WaiterScreen(
                         selectedTable = table
                         currentScreen = "menu"
                     },
-                    onAddItems = { order ->
+                    onEditOrder = { order ->
                         selectedOrderForAdd = order
                         selectedCategory = null
                         addItemCart = emptyList()
-                        addItemMode = true
+                        removedItemIds = emptySet()
+                        editOrderMode = true
                     },
                     onViewOrder = { order ->
                         selectedOrderForView = order
@@ -275,7 +283,7 @@ fun TablesScreen(
     activeOrders: List<Order>,
     loading: Boolean,
     onTableSelect: (Table) -> Unit,
-    onAddItems: (Order) -> Unit,
+    onEditOrder: (Order) -> Unit,
     onViewOrder: (Order) -> Unit,
     onRefresh: () -> Unit
 ) {
@@ -307,7 +315,7 @@ fun TablesScreen(
                         isOccupied = isOccupied,
                         order = order,
                         onClick = { if (!isOccupied) onTableSelect(table) },
-                        onAddItems = { if (order != null) onAddItems(order) },
+                        onEditOrder = { if (order != null) onEditOrder(order) },
                         onViewOrder = { if (order != null) onViewOrder(order) }
                     )
                 }
@@ -322,7 +330,7 @@ fun TableCard(
     isOccupied: Boolean,
     order: Order?,
     onClick: () -> Unit,
-    onAddItems: () -> Unit,
+    onEditOrder: () -> Unit,
     onViewOrder: () -> Unit
 ) {
     Card(
@@ -396,10 +404,10 @@ fun TableCard(
                         contentPadding = PaddingValues(vertical = 4.dp)
                     ) { Text("View", fontSize = 11.sp) }
                     FilledTonalButton(
-                        onClick = onAddItems,
+                        onClick = onEditOrder,
                         modifier = Modifier.weight(1f),
                         contentPadding = PaddingValues(vertical = 4.dp)
-                    ) { Text("+ Items", fontSize = 11.sp) }
+                    ) { Text("Edit", fontSize = 11.sp) }
                 }
             }
         }
@@ -756,4 +764,135 @@ fun OrderDetailDialog(
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } }
     )
+}
+
+@Composable
+fun EditOrderScreen(
+    existingItems: List<OrderItem>,
+    categories: List<Category>,
+    menuItems: List<MenuItem>,
+    selectedCategory: Int?,
+    addItemCart: List<CartItem>,
+    removedItemIds: Set<Int>,
+    onSelectCategory: (Int?) -> Unit,
+    onQuantityChange: (MenuItem, Int) -> Unit,
+    onRemoveExistingItem: (Int) -> Unit,
+    onSubmit: () -> Unit,
+    onCancel: () -> Unit
+) {
+    val filteredItems = if (selectedCategory != null) menuItems.filter { it.categoryId == selectedCategory }
+    else menuItems
+
+    Column(modifier = Modifier.fillMaxSize()) {
+        LazyRow(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            item { FilterChip(selected = selectedCategory == null, onClick = { onSelectCategory(null) }, label = { Text("All") }) }
+            items(categories) { cat -> FilterChip(selected = selectedCategory == cat.id, onClick = { onSelectCategory(cat.id) }, label = { Text(cat.name) }) }
+        }
+
+        LazyColumn(
+            modifier = Modifier.weight(1f),
+            contentPadding = PaddingValues(horizontal = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            if (existingItems.isNotEmpty()) {
+                item {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text("Current Items", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                }
+                items(existingItems) { item ->
+                    val isRemoved = item.id in removedItemIds
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(
+                            containerColor = if (isRemoved) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                            else MaterialTheme.colorScheme.surface
+                        )
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(12.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    "${item.quantity}x ${item.name}",
+                                    textDecoration = if (isRemoved) androidx.compose.ui.text.style.TextDecoration.LineThrough else null,
+                                    color = if (isRemoved) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
+                                    else MaterialTheme.colorScheme.onSurface
+                                )
+                                if (item.addons.isNotEmpty()) {
+                                    Text(item.addons.joinToString(", ") { it.name }, fontSize = 12.sp,
+                                        color = if (isRemoved) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f)
+                                        else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
+                                }
+                            }
+                            IconButton(
+                                onClick = { onRemoveExistingItem(item.id) },
+                                modifier = Modifier.size(32.dp)
+                            ) {
+                                Icon(
+                                    if (isRemoved) Icons.Default.Undo else Icons.Default.Close,
+                                    if (isRemoved) "Undo" else "Remove",
+                                    tint = if (isRemoved) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            item {
+                Spacer(modifier = Modifier.height(8.dp))
+                Text("Add Items", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+            }
+
+            items(filteredItems) { item ->
+                val cartItem = addItemCart.find { it.menuItem.id == item.id }
+                val qty = cartItem?.quantity ?: 0
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(12.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(item.name, fontWeight = FontWeight.Medium)
+                            Text("₹${item.price}", color = MaterialTheme.colorScheme.primary)
+                        }
+                        if (qty > 0) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                IconButton(onClick = { onQuantityChange(item, -1) }, modifier = Modifier.size(32.dp)) {
+                                    Icon(Icons.Default.Remove, "", modifier = Modifier.size(18.dp))
+                                }
+                                Text("$qty", fontWeight = FontWeight.Bold)
+                                IconButton(onClick = { onQuantityChange(item, 1) }, modifier = Modifier.size(32.dp)) {
+                                    Icon(Icons.Default.Add, "", modifier = Modifier.size(18.dp))
+                                }
+                            }
+                        } else {
+                            FilledIconButton(onClick = { onQuantityChange(item, 1) }, modifier = Modifier.size(36.dp)) {
+                                Icon(Icons.Default.Add, "", modifier = Modifier.size(20.dp))
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Surface(shadowElevation = 8.dp) {
+            Row(modifier = Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedButton(onClick = onCancel, modifier = Modifier.weight(1f)) { Text("Cancel") }
+                Button(onClick = onSubmit, modifier = Modifier.weight(1f)) {
+                    Text("Save Changes (${removedItemIds.size} removed, ${addItemCart.size} added)")
+                }
+            }
+        }
+    }
 }

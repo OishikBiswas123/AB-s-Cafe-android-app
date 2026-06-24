@@ -21,6 +21,7 @@ object Routes {
     const val LOGIN = "login"
     const val WAITER = "waiter"
     const val CHEF = "chef"
+    const val DRINKS_CHEF = "drinks_chef"
     const val CASHIER = "cashier"
     const val OWNER = "owner"
 }
@@ -48,6 +49,7 @@ fun AppNavGraph(
                     val destination = when (role) {
                         "waiter" -> Routes.WAITER
                         "chef" -> Routes.CHEF
+                        "drinks_chef" -> Routes.DRINKS_CHEF
                         "cashier" -> Routes.CASHIER
                         "owner" -> Routes.OWNER
                         else -> Routes.WAITER
@@ -78,6 +80,21 @@ fun AppNavGraph(
             ChefScreen(
                 orderRepo = orderRepo,
                 socketClient = socketClient,
+                isDrinksChef = false,
+                onLogout = {
+                    CoroutineScope(Dispatchers.Main).launch { tokenManager.clear() }
+                    RetrofitClient.setToken(null)
+                    socketClient.disconnect()
+                    navController.navigate(Routes.LOGIN) { popUpTo(0) { inclusive = true } }
+                }
+            )
+        }
+
+        composable(Routes.DRINKS_CHEF) {
+            ChefScreen(
+                orderRepo = orderRepo,
+                socketClient = socketClient,
+                isDrinksChef = true,
                 onLogout = {
                     CoroutineScope(Dispatchers.Main).launch { tokenManager.clear() }
                     RetrofitClient.setToken(null)

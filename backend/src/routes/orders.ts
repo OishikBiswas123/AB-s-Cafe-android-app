@@ -64,7 +64,9 @@ router.get('/', authenticate, async (req: AuthRequest, res) => {
   const params: any[] = [];
   let paramIndex = 1;
 
-  if (req.user?.role === 'chef') {
+  if (req.user?.role === 'chef' || req.user?.role === 'drinks_chef') {
+    const itemType = req.user.role === 'drinks_chef' ? 'beverage' : 'food';
+    sql += ` AND o.id IN (SELECT DISTINCT oi.order_id FROM order_items oi JOIN menu_items mi ON mi.id = oi.menu_item_id WHERE mi.type = '${itemType}')`;
     sql += " AND o.status IN ('pending','preparing','ready')";
   }
 
@@ -82,11 +84,15 @@ router.get('/', authenticate, async (req: AuthRequest, res) => {
   const orders = result.rows;
 
   for (const order of orders) {
+    let itemTypeFilter = '';
+    if (req.user?.role === 'chef') itemTypeFilter = " AND mi.type = 'food'";
+    else if (req.user?.role === 'drinks_chef') itemTypeFilter = " AND mi.type = 'beverage'";
+
     const itemsResult = await db.query(
       `SELECT oi.id, oi.menu_item_id, mi.name, oi.quantity, oi.price, oi.notes, oi.status
        FROM order_items oi
        JOIN menu_items mi ON mi.id = oi.menu_item_id
-       WHERE oi.order_id = $1
+       WHERE oi.order_id = $1${itemTypeFilter}
        ORDER BY oi.id`,
       [order.id]
     );
@@ -104,8 +110,8 @@ router.get('/', authenticate, async (req: AuthRequest, res) => {
   res.json(orders);
 });
 
-router.get('/:id', authenticate, async (req, res) => {
-  const order = await getOrderById(Number(req.params.id));
+router.get('/:id', authenticate, async (req: AuthRequest, res) => {
+  const order = await getOrderById(Number(req.params.id), req.user?.role);
   if (!order) return res.status(404).json({ error: 'Order not found' });
   res.json(order);
 });
@@ -144,7 +150,7 @@ router.post('/:id/items', authenticate, authorize('waiter', 'cashier', 'owner'),
   res.json(order);
 });
 
-router.patch('/:id/status', authenticate, authorize('waiter', 'chef', 'owner'), async (req: AuthRequest, res) => {
+router.patch('/:id/status', authenticate, authorize('waiter', 'chef', 'drinks_chef', 'owner'), async (req: AuthRequest, res) => {
   const { id } = req.params;
   const { status } = req.body;
   const validStatuses = ['pending', 'preparing', 'ready', 'served'];
@@ -159,7 +165,7 @@ router.patch('/:id/status', authenticate, authorize('waiter', 'chef', 'owner'), 
   res.json(order);
 });
 
-router.patch('/items/:itemId/status', authenticate, authorize('chef', 'owner', 'waiter'), async (req, res) => {
+router.patch('/items/:itemId/status', authenticate, authorize('chef', 'drinks_chef', 'owner', 'waiter'), async (req, res) => {
   const { itemId } = req.params;
   const { status } = req.body;
   const validStatuses = ['pending', 'preparing', 'ready', 'served'];
@@ -272,7 +278,7 @@ router.post('/:id/split', authenticate, authorize('cashier', 'owner'), async (re
   res.json({ success: true, orders: createdOrders });
 });
 
-async function getOrderById(orderId: number) {
+async function getOrderById(orderId: number, role?: string) {
   const db = await getDatabase();
   const result = await db.query(
     `SELECT o.id, o.table_id, t.number as table_number, o.waiter_id, u.name as waiter_name,
@@ -287,11 +293,15 @@ async function getOrderById(orderId: number) {
 
   const order = result.rows[0];
 
+  let itemTypeFilter = '';
+  if (role === 'chef') itemTypeFilter = " AND mi.type = 'food'";
+  else if (role === 'drinks_chef') itemTypeFilter = " AND mi.type = 'beverage'";
+
   const itemsResult = await db.query(
     `SELECT oi.id, oi.menu_item_id, mi.name, oi.quantity, oi.price, oi.notes, oi.status
      FROM order_items oi
      JOIN menu_items mi ON mi.id = oi.menu_item_id
-     WHERE oi.order_id = $1
+     WHERE oi.order_id = $1${itemTypeFilter}
      ORDER BY oi.id`,
     [orderId]
   );

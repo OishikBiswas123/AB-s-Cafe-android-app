@@ -26,6 +26,7 @@ import org.json.JSONObject
 fun ChefScreen(
     orderRepo: OrderRepository,
     socketClient: SocketClient,
+    isDrinksChef: Boolean = false,
     onLogout: () -> Unit
 ) {
     var orders by remember { mutableStateOf<List<Order>>(emptyList()) }
@@ -80,7 +81,15 @@ fun ChefScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(if (currentTab == 0) "Kitchen Orders" else "Menu Items") },
+                title = {
+                    Text(
+                        when {
+                            currentTab == 0 && isDrinksChef -> "Beverage Orders"
+                            currentTab == 0 -> "Kitchen Orders"
+                            else -> "Menu Items"
+                        }
+                    )
+                },
                 actions = {
                     IconButton(onClick = { loadOrders() }) { Icon(Icons.Default.Refresh, "Refresh") }
                     IconButton(onClick = { showLogoutDialog = true }) { Icon(Icons.Default.Logout, "Logout") }

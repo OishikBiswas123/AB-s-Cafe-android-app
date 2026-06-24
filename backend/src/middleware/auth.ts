@@ -7,7 +7,7 @@ export interface AuthUser {
   id: number;
   name: string;
   email: string;
-  role: 'owner' | 'waiter' | 'chef' | 'cashier';
+  role: 'owner' | 'waiter' | 'chef' | 'cashier' | 'drinks_chef';
 }
 
 export interface AuthRequest extends Request {

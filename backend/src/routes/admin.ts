@@ -40,7 +40,7 @@ router.delete('/users/:id', authenticate, authorize('owner'), async (req, res) =
   if (userResult.rows.length === 0) {
     return res.status(404).json({ error: 'User not found' });
   }
-  const protectedEmails = ['owner@abscafe.com', 'waiter@abscafe.com', 'chef@abscafe.com', 'cashier@abscafe.com'];
+  const protectedEmails = ['owner@abscafe.com', 'waiter@abscafe.com', 'chef@abscafe.com', 'cashier@abscafe.com', 'drinks@abscafe.com'];
   if (protectedEmails.includes(userResult.rows[0].email)) {
     return res.status(403).json({ error: 'Cannot delete default users' });
   }
