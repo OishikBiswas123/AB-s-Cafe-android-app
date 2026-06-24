@@ -32,6 +32,7 @@ import com.abscafe.data.repository.MenuRepository
 import com.abscafe.data.repository.OrderRepository
 import com.abscafe.data.repository.TableRepository
 import com.abscafe.ui.theme.*
+import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
@@ -54,6 +55,8 @@ fun WaiterScreen(
     var cart by remember { mutableStateOf<List<CartItem>>(emptyList()) }
     var activeOrders by remember { mutableStateOf<List<Order>>(emptyList()) }
     var loading by remember { mutableStateOf(false) }
+    var placingOrder by remember { mutableStateOf(false) }
+    var savingOrder by remember { mutableStateOf(false) }
     var isTakeaway by remember { mutableStateOf(false) }
     var showCart by remember { mutableStateOf(false) }
     var editOrderMode by remember { mutableStateOf(false) }
@@ -69,10 +72,14 @@ fun WaiterScreen(
     fun loadData() {
         scope.launch {
             loading = true
-            tableRepo.getTables().onSuccess { tables = it }
-            menuRepo.getCategories().onSuccess { categories = it }
-            menuRepo.getMenuItems().onSuccess { menuItems = it }
-            orderRepo.getOrders().onSuccess { activeOrders = it }
+            val t = async { tableRepo.getTables() }
+            val c = async { menuRepo.getCategories() }
+            val m = async { menuRepo.getMenuItems() }
+            val o = async { orderRepo.getOrders() }
+            t.await().onSuccess { tables = it }
+            c.await().onSuccess { categories = it }
+            m.await().onSuccess { menuItems = it }
+            o.await().onSuccess { activeOrders = it }
             loading = false
         }
     }
@@ -177,6 +184,7 @@ fun WaiterScreen(
                         selectedCategory = selectedCategory,
                         addItemCart = addItemCart,
                         updatedItemQtys = updatedItemQtys,
+                        savingOrder = savingOrder,
                         onSelectCategory = { selectedCategory = it },
                         onAddToCartItem = { item, delta ->
                             val existing = addItemCart.find { it.menuItem.id == item.id }
@@ -197,25 +205,33 @@ fun WaiterScreen(
                             else updatedItemQtys + (itemId to newQty)
                         },
                         onSubmit = {
+                            if (savingOrder) return@EditOrderScreen
+                            savingOrder = true
                             scope.launch {
-                                for ((itemId, newQty) in updatedItemQtys) {
-                                    val item = orderItems.find { it.id == itemId }
-                                    if (item != null) {
-                                        if (newQty <= 0) orderRepo.deleteItem(itemId)
-                                        else orderRepo.updateItemQuantity(itemId, newQty)
+                                try {
+                                    for ((itemId, newQty) in updatedItemQtys) {
+                                        val item = orderItems.find { it.id == itemId }
+                                        if (item != null) {
+                                            if (newQty <= 0) orderRepo.deleteItem(itemId)
+                                            else orderRepo.updateItemQuantity(itemId, newQty)
+                                        }
                                     }
+                                    if (addItemCart.isNotEmpty()) {
+                                        val items = addItemCart.map { it.toOrderItemInput() }
+                                        orderRepo.addItems(selectedOrderForAdd!!.id, items)
+                                    }
+                                    socketClient.emit("order:update", JSONObject().apply {
+                                        put("order_id", selectedOrderForAdd!!.id)
+                                        put("table_id", selectedOrderForAdd!!.tableId)
+                                    })
+                                    snackbarHostState.showSnackbar("Order updated!")
+                                    editOrderMode = false; addItemCart = emptyList(); updatedItemQtys = emptyMap()
+                                    loadData()
+                                } catch (e: Exception) {
+                                    snackbarHostState.showSnackbar("Failed to update order")
+                                } finally {
+                                    savingOrder = false
                                 }
-                                if (addItemCart.isNotEmpty()) {
-                                    val items = addItemCart.map { it.toOrderItemInput() }
-                                    orderRepo.addItems(selectedOrderForAdd!!.id, items)
-                                }
-                                socketClient.emit("order:update", JSONObject().apply {
-                                    put("order_id", selectedOrderForAdd!!.id)
-                                    put("table_id", selectedOrderForAdd!!.tableId)
-                                })
-                                snackbarHostState.showSnackbar("Order updated!")
-                                editOrderMode = false; addItemCart = emptyList(); updatedItemQtys = emptyMap()
-                                loadData()
                             }
                         },
                         onCancel = { editOrderMode = false; addItemCart = emptyList(); updatedItemQtys = emptyMap() }
@@ -225,6 +241,7 @@ fun WaiterScreen(
                 showCart -> CartScreen(
                     cart = cart,
                     isTakeaway = isTakeaway,
+                    placingOrder = placingOrder,
                     onQuantityChange = { itemId, delta ->
                         cart = cart.mapNotNull { if (it.menuItem.id == itemId) { val nq = it.quantity + delta; if (nq <= 0) null else it.copy(quantity = nq) } else it }
                     },
@@ -234,6 +251,8 @@ fun WaiterScreen(
                     },
                     onToggleTakeaway = { isTakeaway = !isTakeaway },
                     onPlaceOrder = {
+                        if (placingOrder) return@CartScreen
+                        placingOrder = true
                         scope.launch {
                             val items = cart.map { it.toOrderItemInput() }
                             orderRepo.createOrder(selectedTable!!.id, items, isTakeaway).onSuccess { orders ->
@@ -247,7 +266,10 @@ fun WaiterScreen(
                                 showCart = false; cart = emptyList(); isTakeaway = false
                                 currentScreen = "tables"
                                 loadData()
-                            }.onFailure { snackbarHostState.showSnackbar("Failed to place order") }
+                            }.onFailure {
+                                snackbarHostState.showSnackbar("Failed to place order")
+                            }
+                            placingOrder = false
                         }
                     },
                     onBack = { showCart = false; cart = emptyList() }
@@ -538,6 +560,7 @@ fun MenuItemCard(
 fun CartScreen(
     cart: List<CartItem>,
     isTakeaway: Boolean,
+    placingOrder: Boolean = false,
     onQuantityChange: (Int, Int) -> Unit,
     onRemoveItem: (Int) -> Unit,
     onToggleCheese: (Int) -> Unit,
@@ -618,8 +641,11 @@ fun CartScreen(
                 }
                 Spacer(modifier = Modifier.height(12.dp))
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    OutlinedButton(onClick = onBack, modifier = Modifier.weight(1f)) { Text("Back") }
-                    Button(onClick = onPlaceOrder, modifier = Modifier.weight(1f)) { Text("Place Order") }
+                    OutlinedButton(onClick = onBack, modifier = Modifier.weight(1f), enabled = !placingOrder) { Text("Back") }
+                    Button(onClick = onPlaceOrder, modifier = Modifier.weight(1f), enabled = !placingOrder) {
+                        if (placingOrder) CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                        else Text("Place Order")
+                    }
                 }
             }
         }
@@ -783,6 +809,7 @@ fun EditOrderScreen(
     selectedCategory: Int?,
     addItemCart: List<CartItem>,
     updatedItemQtys: Map<Int, Int>,
+    savingOrder: Boolean = false,
     onSelectCategory: (Int?) -> Unit,
     onAddToCartItem: (MenuItem, Int) -> Unit,
     onUpdateExistingQty: (Int, Int) -> Unit,
@@ -900,13 +927,16 @@ fun EditOrderScreen(
 
         Surface(shadowElevation = 8.dp) {
             Row(modifier = Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                OutlinedButton(onClick = onCancel, modifier = Modifier.weight(1f)) { Text("Cancel") }
-                Button(onClick = onSubmit, modifier = Modifier.weight(1f)) {
-                    val changedCount = updatedItemQtys.count { (id, qty) ->
-                        val orig = existingItems.find { it.id == id }?.quantity ?: qty
-                        qty != orig
+                OutlinedButton(onClick = onCancel, modifier = Modifier.weight(1f), enabled = !savingOrder) { Text("Cancel") }
+                Button(onClick = onSubmit, modifier = Modifier.weight(1f), enabled = !savingOrder) {
+                    if (savingOrder) CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                    else {
+                        val changedCount = updatedItemQtys.count { (id, qty) ->
+                            val orig = existingItems.find { it.id == id }?.quantity ?: qty
+                            qty != orig
+                        }
+                        Text("Save Changes ($changedCount changed, ${addItemCart.size} added)")
                     }
-                    Text("Save Changes ($changedCount changed, ${addItemCart.size} added)")
                 }
             }
         }

@@ -98,30 +98,52 @@ router.get('/', authenticate, async (req: AuthRequest, res) => {
   sql += ' ORDER BY o.created_at DESC';
 
   const result = await db.query(sql, params);
-  const orders = result.rows;
+  const orders: any[] = result.rows;
+  if (orders.length === 0) return res.json([]);
+
+  const orderIds = orders.map((o: any) => o.id);
+
+  // Batch load all items for all orders
+  let itemTypeFilter = '';
+  if (req.user?.role === 'chef') itemTypeFilter = " AND mi.type = 'food'";
+  else if (req.user?.role === 'drinks_chef') itemTypeFilter = " AND mi.type = 'beverage'";
+
+  const itemsResult = await db.query(
+    `SELECT oi.id, oi.order_id, oi.menu_item_id, mi.name, oi.quantity, oi.price, oi.notes, oi.status
+     FROM order_items oi
+     JOIN menu_items mi ON mi.id = oi.menu_item_id
+     WHERE oi.order_id = ANY($1::int[])${itemTypeFilter}
+     ORDER BY oi.id`,
+    [orderIds]
+  );
+  const allItems = itemsResult.rows;
+
+  // Batch load all addons for all items
+  const itemIds = allItems.map((i: any) => i.id);
+  let addonsMap = new Map<number, any[]>();
+  if (itemIds.length > 0) {
+    const addonsResult = await db.query(
+      'SELECT id, order_item_id, name, price FROM order_addons WHERE order_item_id = ANY($1::int[])',
+      [itemIds]
+    );
+    for (const addon of addonsResult.rows) {
+      const list = addonsMap.get(addon.order_item_id) || [];
+      list.push(addon);
+      addonsMap.set(addon.order_item_id, list);
+    }
+  }
+
+  // Assemble orders with items and addons
+  const itemsByOrder = new Map<number, any[]>();
+  for (const item of allItems) {
+    item.addons = addonsMap.get(item.id) || [];
+    const list = itemsByOrder.get(item.order_id) || [];
+    list.push(item);
+    itemsByOrder.set(item.order_id, list);
+  }
 
   for (const order of orders) {
-    let itemTypeFilter = '';
-    if (req.user?.role === 'chef') itemTypeFilter = " AND mi.type = 'food'";
-    else if (req.user?.role === 'drinks_chef') itemTypeFilter = " AND mi.type = 'beverage'";
-
-    const itemsResult = await db.query(
-      `SELECT oi.id, oi.menu_item_id, mi.name, oi.quantity, oi.price, oi.notes, oi.status
-       FROM order_items oi
-       JOIN menu_items mi ON mi.id = oi.menu_item_id
-       WHERE oi.order_id = $1${itemTypeFilter}
-       ORDER BY oi.id`,
-      [order.id]
-    );
-    order.items = itemsResult.rows;
-
-    for (const item of order.items) {
-      const addonResult = await db.query(
-        'SELECT id, name, price FROM order_addons WHERE order_item_id = $1',
-        [item.id]
-      );
-      item.addons = addonResult.rows;
-    }
+    order.items = itemsByOrder.get(order.id) || [];
   }
 
   res.json(orders);
@@ -353,14 +375,26 @@ async function getOrderById(orderId: number, role?: string) {
      ORDER BY oi.id`,
     [orderId]
   );
-  order.items = itemsResult.rows;
+  const items = itemsResult.rows;
 
-  for (const item of order.items) {
-    const addonResult = await db.query(
-      'SELECT id, name, price FROM order_addons WHERE order_item_id = $1', [item.id]
+  const itemIds = items.map((i: any) => i.id);
+  let addonsMap = new Map<number, any[]>();
+  if (itemIds.length > 0) {
+    const addonsResult = await db.query(
+      'SELECT id, order_item_id, name, price FROM order_addons WHERE order_item_id = ANY($1::int[])',
+      [itemIds]
     );
-    item.addons = addonResult.rows;
+    for (const addon of addonsResult.rows) {
+      const list = addonsMap.get(addon.order_item_id) || [];
+      list.push(addon);
+      addonsMap.set(addon.order_item_id, list);
+    }
   }
+
+  for (const item of items) {
+    item.addons = addonsMap.get(item.id) || [];
+  }
+  order.items = items;
 
   return order;
 }

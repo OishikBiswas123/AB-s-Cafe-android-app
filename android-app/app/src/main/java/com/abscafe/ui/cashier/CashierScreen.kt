@@ -48,6 +48,7 @@ import com.abscafe.data.model.*
 import com.abscafe.data.repository.MenuRepository
 import com.abscafe.data.repository.OrderRepository
 import com.abscafe.ui.theme.*
+import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import org.json.JSONObject
 import java.io.FileOutputStream
@@ -66,6 +67,7 @@ fun CashierScreen(
     var loading by remember { mutableStateOf(false) }
     var selectedOrder by remember { mutableStateOf<Order?>(null) }
     var showPaymentDialog by remember { mutableStateOf(false) }
+    var processingPayment by remember { mutableStateOf(false) }
     var showLogoutDialog by remember { mutableStateOf(false) }
     var editMode by remember { mutableStateOf(false) }
     var excludedItemIds by remember { mutableStateOf<Set<Int>>(emptySet()) }
@@ -90,8 +92,10 @@ fun CashierScreen(
 
     fun loadMenu() {
         scope.launch {
-            menuRepo.getCategories().onSuccess { categories = it }
-            menuRepo.getMenuItems().onSuccess { menuItems = it }
+            val c = async { menuRepo.getCategories() }
+            val m = async { menuRepo.getMenuItems() }
+            c.await().onSuccess { categories = it }
+            m.await().onSuccess { menuItems = it }
         }
     }
 
@@ -146,8 +150,11 @@ fun CashierScreen(
     if (showPaymentDialog && selectedOrder != null) {
         PaymentDialog(
             order = selectedOrder!!,
+            processingPayment = processingPayment,
             onDismiss = { showPaymentDialog = false },
             onConfirm = { method ->
+                if (processingPayment) return@PaymentDialog
+                processingPayment = true
                 scope.launch {
                     val response = RetrofitClient.apiService.payOrder(selectedOrder!!.id, PaymentRequest(method))
                     if (response.isSuccessful) {
@@ -164,6 +171,7 @@ fun CashierScreen(
                         snackbarHostState.showSnackbar("Payment failed")
                         showPaymentDialog = false
                     }
+                    processingPayment = false
                 }
             }
         )
@@ -786,6 +794,7 @@ fun SmsBillDialog(
 @Composable
 fun PaymentDialog(
     order: Order,
+    processingPayment: Boolean = false,
     onDismiss: () -> Unit,
     onConfirm: (String) -> Unit
 ) {
@@ -804,11 +813,13 @@ fun PaymentDialog(
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(
                         onClick = { onConfirm("cash") },
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier.weight(1f),
+                        enabled = !processingPayment
                     ) { Text("Cash") }
                     Button(
                         onClick = { onConfirm("qr") },
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier.weight(1f),
+                        enabled = !processingPayment
                     ) { Text("QR Code") }
                 }
                 TextButton(onClick = onDismiss, modifier = Modifier.align(Alignment.CenterHorizontally)) { Text("Cancel") }
