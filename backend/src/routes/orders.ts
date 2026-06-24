@@ -215,6 +215,37 @@ router.delete('/items/:itemId', authenticate, authorize('cashier', 'waiter', 'ow
   res.json({ success: true, order: updatedOrder });
 });
 
+router.patch('/items/:itemId', authenticate, authorize('waiter', 'cashier', 'owner'), async (req: AuthRequest, res) => {
+  const { itemId } = req.params;
+  const { quantity } = req.body;
+
+  if (!quantity || quantity < 1) {
+    return res.status(400).json({ error: 'Quantity must be at least 1' });
+  }
+
+  const db = await getDatabase();
+
+  const itemResult = await db.query('SELECT order_id FROM order_items WHERE id = $1', [itemId]);
+  if (!itemResult.rows.length) {
+    return res.status(404).json({ error: 'Item not found' });
+  }
+  const orderId = itemResult.rows[0].order_id;
+
+  await db.query('UPDATE order_items SET quantity = $1 WHERE id = $2', [quantity, itemId]);
+
+  const totalResult = await db.query(`
+    SELECT COALESCE(SUM(
+      oi.price * oi.quantity + COALESCE(
+        (SELECT SUM(oa.price) * oi.quantity FROM order_addons oa WHERE oa.order_item_id = oi.id), 0
+      )
+    ), 0) as total FROM order_items oi WHERE oi.order_id = $1
+  `, [orderId]);
+  await db.query('UPDATE orders SET total = $1, updated_at = NOW() WHERE id = $2', [totalResult.rows[0].total, orderId]);
+
+  const updatedOrder = await getOrderById(orderId);
+  res.json({ success: true, order: updatedOrder });
+});
+
 router.post('/:id/split', authenticate, authorize('cashier', 'owner'), async (req: AuthRequest, res) => {
   const { id } = req.params;
   const { groups } = req.body;

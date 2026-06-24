@@ -58,7 +58,7 @@ fun WaiterScreen(
     var showCart by remember { mutableStateOf(false) }
     var editOrderMode by remember { mutableStateOf(false) }
     var selectedOrderForAdd by remember { mutableStateOf<Order?>(null) }
-    var removedItemIds by remember { mutableStateOf<Set<Int>>(emptySet()) }
+    var updatedItemQtys by remember { mutableStateOf<Map<Int, Int>>(emptyMap()) }
     var addItemCart by remember { mutableStateOf<List<CartItem>>(emptyList()) }
     var showLogoutDialog by remember { mutableStateOf(false) }
     var showOrderDetail by remember { mutableStateOf(false) }
@@ -140,7 +140,7 @@ fun WaiterScreen(
                 navigationIcon = {
                     if (currentScreen != "tables" || showCart || editOrderMode) {
                         IconButton(onClick = {
-                            if (editOrderMode) { editOrderMode = false; addItemCart = emptyList(); removedItemIds = emptySet() }
+                            if (editOrderMode) { editOrderMode = false; addItemCart = emptyList(); updatedItemQtys = emptyMap() }
                             else if (showCart) { showCart = false; cart = emptyList() }
                             else if (currentScreen == "menu") { currentScreen = "tables" }
                         }) { Icon(Icons.Default.ArrowBack, "Back") }
@@ -171,21 +171,34 @@ fun WaiterScreen(
                         menuItems = menuItems,
                         selectedCategory = selectedCategory,
                         addItemCart = addItemCart,
-                        removedItemIds = removedItemIds,
+                        updatedItemQtys = updatedItemQtys,
                         onSelectCategory = { selectedCategory = it },
-                        onQuantityChange = { item, delta ->
-                            addItemCart = addItemCart.mapNotNull { if (it.menuItem.id == item.id) { val nq = it.quantity + delta; if (nq <= 0) null else it.copy(quantity = nq) } else it }
-                            if (addItemCart.none { it.menuItem.id == item.id }) {
+                        onAddToCartItem = { item, delta ->
+                            val existing = addItemCart.find { it.menuItem.id == item.id }
+                            if (existing != null) {
+                                val newQty = existing.quantity + delta
+                                addItemCart = if (newQty <= 0) addItemCart.filterNot { it.menuItem.id == item.id }
+                                else addItemCart.map { if (it.menuItem.id == item.id) it.copy(quantity = newQty) else it }
+                            } else if (delta > 0) {
                                 addItemCart = addItemCart + CartItem(item)
                             }
                         },
-                        onRemoveExistingItem = { itemId ->
-                            removedItemIds = if (itemId in removedItemIds) removedItemIds - itemId else removedItemIds + itemId
+                        onUpdateExistingQty = { itemId, delta ->
+                            val item = orderItems.find { it.id == itemId } ?: return@EditOrderScreen
+                            val currentQty = updatedItemQtys[itemId] ?: item.quantity
+                            val newQty = currentQty + delta
+                            updatedItemQtys = if (newQty <= 0) updatedItemQtys + (itemId to 0)
+                            else if (newQty == item.quantity) updatedItemQtys - itemId
+                            else updatedItemQtys + (itemId to newQty)
                         },
                         onSubmit = {
                             scope.launch {
-                                for (itemId in removedItemIds) {
-                                    orderRepo.deleteItem(itemId)
+                                for ((itemId, newQty) in updatedItemQtys) {
+                                    val item = orderItems.find { it.id == itemId }
+                                    if (item != null) {
+                                        if (newQty <= 0) orderRepo.deleteItem(itemId)
+                                        else orderRepo.updateItemQuantity(itemId, newQty)
+                                    }
                                 }
                                 if (addItemCart.isNotEmpty()) {
                                     val items = addItemCart.map { it.toOrderItemInput() }
@@ -196,11 +209,11 @@ fun WaiterScreen(
                                     put("table_id", selectedOrderForAdd!!.tableId)
                                 })
                                 snackbarHostState.showSnackbar("Order updated!")
-                                editOrderMode = false; addItemCart = emptyList(); removedItemIds = emptySet()
+                                editOrderMode = false; addItemCart = emptyList(); updatedItemQtys = emptyMap()
                                 loadData()
                             }
                         },
-                        onCancel = { editOrderMode = false; addItemCart = emptyList(); removedItemIds = emptySet() }
+                        onCancel = { editOrderMode = false; addItemCart = emptyList(); updatedItemQtys = emptyMap() }
                     )
                 }
 
@@ -248,7 +261,7 @@ fun WaiterScreen(
                         selectedOrderForAdd = order
                         selectedCategory = null
                         addItemCart = emptyList()
-                        removedItemIds = emptySet()
+                        updatedItemQtys = emptyMap()
                         editOrderMode = true
                     },
                     onViewOrder = { order ->
@@ -773,10 +786,10 @@ fun EditOrderScreen(
     menuItems: List<MenuItem>,
     selectedCategory: Int?,
     addItemCart: List<CartItem>,
-    removedItemIds: Set<Int>,
+    updatedItemQtys: Map<Int, Int>,
     onSelectCategory: (Int?) -> Unit,
-    onQuantityChange: (MenuItem, Int) -> Unit,
-    onRemoveExistingItem: (Int) -> Unit,
+    onAddToCartItem: (MenuItem, Int) -> Unit,
+    onUpdateExistingQty: (Int, Int) -> Unit,
     onSubmit: () -> Unit,
     onCancel: () -> Unit
 ) {
@@ -803,7 +816,8 @@ fun EditOrderScreen(
                     Text("Current Items", fontWeight = FontWeight.Bold, fontSize = 16.sp)
                 }
                 items(existingItems) { item ->
-                    val isRemoved = item.id in removedItemIds
+                    val currentQty = updatedItemQtys[item.id] ?: item.quantity
+                    val isRemoved = currentQty <= 0
                     Card(
                         modifier = Modifier.fillMaxWidth(),
                         colors = CardDefaults.cardColors(
@@ -818,10 +832,11 @@ fun EditOrderScreen(
                         ) {
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
-                                    "${item.quantity}x ${item.name}",
+                                    "${currentQty}x ${item.name}",
                                     textDecoration = if (isRemoved) androidx.compose.ui.text.style.TextDecoration.LineThrough else null,
                                     color = if (isRemoved) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
-                                    else MaterialTheme.colorScheme.onSurface
+                                    else MaterialTheme.colorScheme.onSurface,
+                                    fontWeight = FontWeight.Medium
                                 )
                                 if (item.addons.isNotEmpty()) {
                                     Text(item.addons.joinToString(", ") { it.name }, fontSize = 12.sp,
@@ -829,16 +844,17 @@ fun EditOrderScreen(
                                         else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
                                 }
                             }
-                            IconButton(
-                                onClick = { onRemoveExistingItem(item.id) },
-                                modifier = Modifier.size(32.dp)
-                            ) {
-                                Icon(
-                                    if (isRemoved) Icons.Default.Undo else Icons.Default.Close,
-                                    if (isRemoved) "Undo" else "Remove",
-                                    tint = if (isRemoved) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
-                                    modifier = Modifier.size(18.dp)
-                                )
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                IconButton(
+                                    onClick = { onUpdateExistingQty(item.id, -1) },
+                                    modifier = Modifier.size(32.dp),
+                                    enabled = !isRemoved
+                                ) { Icon(Icons.Default.Remove, "Decrease", modifier = Modifier.size(18.dp)) }
+                                Text("$currentQty", fontWeight = FontWeight.Bold, color = if (isRemoved) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f) else MaterialTheme.colorScheme.onSurface)
+                                IconButton(
+                                    onClick = { onUpdateExistingQty(item.id, 1) },
+                                    modifier = Modifier.size(32.dp)
+                                ) { Icon(Icons.Default.Add, "Increase", modifier = Modifier.size(18.dp)) }
                             }
                         }
                     }
@@ -868,16 +884,16 @@ fun EditOrderScreen(
                         }
                         if (qty > 0) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                IconButton(onClick = { onQuantityChange(item, -1) }, modifier = Modifier.size(32.dp)) {
+                                IconButton(onClick = { onAddToCartItem(item, -1) }, modifier = Modifier.size(32.dp)) {
                                     Icon(Icons.Default.Remove, "", modifier = Modifier.size(18.dp))
                                 }
                                 Text("$qty", fontWeight = FontWeight.Bold)
-                                IconButton(onClick = { onQuantityChange(item, 1) }, modifier = Modifier.size(32.dp)) {
+                                IconButton(onClick = { onAddToCartItem(item, 1) }, modifier = Modifier.size(32.dp)) {
                                     Icon(Icons.Default.Add, "", modifier = Modifier.size(18.dp))
                                 }
                             }
                         } else {
-                            FilledIconButton(onClick = { onQuantityChange(item, 1) }, modifier = Modifier.size(36.dp)) {
+                            FilledIconButton(onClick = { onAddToCartItem(item, 1) }, modifier = Modifier.size(36.dp)) {
                                 Icon(Icons.Default.Add, "", modifier = Modifier.size(20.dp))
                             }
                         }
@@ -890,7 +906,11 @@ fun EditOrderScreen(
             Row(modifier = Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 OutlinedButton(onClick = onCancel, modifier = Modifier.weight(1f)) { Text("Cancel") }
                 Button(onClick = onSubmit, modifier = Modifier.weight(1f)) {
-                    Text("Save Changes (${removedItemIds.size} removed, ${addItemCart.size} added)")
+                    val changedCount = updatedItemQtys.count { (id, qty) ->
+                        val orig = existingItems.find { it.id == id }?.quantity ?: qty
+                        qty != orig
+                    }
+                    Text("Save Changes ($changedCount changed, ${addItemCart.size} added)")
                 }
             }
         }

@@ -47,6 +47,16 @@ class OrderRepository {
         }
     }
 
+    suspend fun updateItemQuantity(itemId: Int, quantity: Int): Result<ApiResponse> {
+        return try {
+            val response = RetrofitClient.apiService.updateOrderItemQuantity(itemId, mapOf("quantity" to quantity))
+            if (response.isSuccessful) Result.success(response.body()!!)
+            else Result.failure(Exception("Failed to update quantity"))
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
     suspend fun deleteItem(itemId: Int): Result<ApiResponse> {
         return try {
             val response = RetrofitClient.apiService.deleteOrderItem(itemId)
