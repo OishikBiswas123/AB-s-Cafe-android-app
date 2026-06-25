@@ -48,6 +48,36 @@ router.delete('/users/:id', authenticate, authorize('owner'), async (req, res) =
   res.json({ success: true });
 });
 
+router.put('/users/:id', authenticate, authorize('owner'), async (req: AuthRequest, res) => {
+  const { id } = req.params;
+  const { name, email, password, role } = req.body;
+  const db = await getDatabase();
+
+  const userCheck = await db.query('SELECT id FROM users WHERE id = $1', [id]);
+  if (!userCheck.rows.length) return res.status(404).json({ error: 'User not found' });
+
+  const sets: string[] = [];
+  const params: any[] = [];
+  let idx = 1;
+
+  if (name !== undefined) { sets.push(`name = $${idx++}`); params.push(name); }
+  if (email !== undefined) { sets.push(`email = $${idx++}`); params.push(email); }
+  if (role !== undefined) { sets.push(`role = $${idx++}`); params.push(role); }
+  if (password) {
+    const hash = await bcrypt.hash(password, 10);
+    sets.push(`password_hash = $${idx++}`);
+    params.push(hash);
+  }
+
+  if (sets.length === 0) return res.status(400).json({ error: 'Nothing to update' });
+
+  params.push(id);
+  await db.query(`UPDATE users SET ${sets.join(', ')} WHERE id = $${idx}`, params);
+
+  const userResult = await db.query('SELECT id, name, email, role, created_at FROM users WHERE id = $1', [id]);
+  res.json({ success: true, user: userResult.rows[0] });
+});
+
 router.patch('/users/:id/reset-password', authenticate, authorize('owner'), async (req, res) => {
   const { id } = req.params;
   const { password } = req.body;

@@ -476,6 +476,12 @@ fun UserManagementTab() {
     var users by remember { mutableStateOf<List<User>>(emptyList()) }
     var loading by remember { mutableStateOf(false) }
     var showAddDialog by remember { mutableStateOf(false) }
+    var showEditDialog by remember { mutableStateOf(false) }
+    var editingUser by remember { mutableStateOf<User?>(null) }
+    var editName by remember { mutableStateOf("") }
+    var editEmail by remember { mutableStateOf("") }
+    var editPassword by remember { mutableStateOf("") }
+    var editRole by remember { mutableStateOf("waiter") }
     var newName by remember { mutableStateOf("") }
     var newEmail by remember { mutableStateOf("") }
     var newPassword by remember { mutableStateOf("staff123") }
@@ -489,6 +495,15 @@ fun UserManagementTab() {
             try { val r = RetrofitClient.apiService.getUsers(); if (r.isSuccessful) users = r.body() ?: emptyList() } catch (_: Exception) {}
             loading = false
         }
+    }
+
+    fun openEdit(user: User) {
+        editingUser = user
+        editName = user.name
+        editEmail = user.email
+        editPassword = ""
+        editRole = user.role
+        showEditDialog = true
     }
 
     LaunchedEffect(Unit) { load() }
@@ -514,27 +529,30 @@ fun UserManagementTab() {
                                 }
                             }
                             val isDefaultUser = user.email in listOf("owner@abscafe.com", "waiter@abscafe.com", "chef@abscafe.com", "cashier@abscafe.com", "drinks@abscafe.com")
-                            if (!isDefaultUser) {
-                                var showDeleteConfirm by remember { mutableStateOf(false) }
-                                IconButton(onClick = { showDeleteConfirm = true }) { Icon(Icons.Default.Delete, "Delete", tint = MaterialTheme.colorScheme.error) }
-                                if (showDeleteConfirm) {
-                                    AlertDialog(
-                                        onDismissRequest = { showDeleteConfirm = false },
-                                        title = { Text("Delete User?") },
-                                        text = { Text("Are you sure you want to delete ${user.name} (${user.email})?") },
-                                        confirmButton = {
-                                            TextButton(onClick = {
-                                                showDeleteConfirm = false
-                                                scope.launch {
-                                                    RetrofitClient.apiService.deleteUser(user.id)
-                                                    load()
-                                                }
-                                            }) { Text("Delete", color = MaterialTheme.colorScheme.error) }
-                                        },
-                                        dismissButton = {
-                                            TextButton(onClick = { showDeleteConfirm = false }) { Text("Cancel") }
-                                        }
-                                    )
+                            Row {
+                                IconButton(onClick = { openEdit(user) }) { Icon(Icons.Default.Edit, "Edit") }
+                                if (!isDefaultUser) {
+                                    var showDeleteConfirm by remember { mutableStateOf(false) }
+                                    IconButton(onClick = { showDeleteConfirm = true }) { Icon(Icons.Default.Delete, "Delete", tint = MaterialTheme.colorScheme.error) }
+                                    if (showDeleteConfirm) {
+                                        AlertDialog(
+                                            onDismissRequest = { showDeleteConfirm = false },
+                                            title = { Text("Delete User?") },
+                                            text = { Text("Are you sure you want to delete ${user.name} (${user.email})?") },
+                                            confirmButton = {
+                                                TextButton(onClick = {
+                                                    showDeleteConfirm = false
+                                                    scope.launch {
+                                                        RetrofitClient.apiService.deleteUser(user.id)
+                                                        load()
+                                                    }
+                                                }) { Text("Delete", color = MaterialTheme.colorScheme.error) }
+                                            },
+                                            dismissButton = {
+                                                TextButton(onClick = { showDeleteConfirm = false }) { Text("Cancel") }
+                                            }
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -582,6 +600,53 @@ fun UserManagementTab() {
                     }) { Text("Add") }
                 },
                 dismissButton = { TextButton(onClick = { showAddDialog = false }) { Text("Cancel") } }
+            )
+        }
+
+        if (showEditDialog && editingUser != null) {
+            val user = editingUser!!
+            AlertDialog(
+                onDismissRequest = { showEditDialog = false; editingUser = null },
+                title = { Text("Edit User") },
+                text = {
+                    Column {
+                        OutlinedTextField(value = editName, onValueChange = { editName = it }, label = { Text("Name") }, modifier = Modifier.fillMaxWidth())
+                        Spacer(modifier = Modifier.height(8.dp))
+                        OutlinedTextField(value = editEmail, onValueChange = { editEmail = it }, label = { Text("Email") }, modifier = Modifier.fillMaxWidth())
+                        Spacer(modifier = Modifier.height(8.dp))
+                        OutlinedTextField(value = editPassword, onValueChange = { editPassword = it }, label = { Text("New Password (leave blank to keep)") }, modifier = Modifier.fillMaxWidth())
+                        Spacer(modifier = Modifier.height(8.dp))
+                        listOf("owner", "waiter", "chef", "drinks_chef", "cashier").forEach { role ->
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                RadioButton(selected = editRole == role, onClick = { editRole = role })
+                                Text(role.replace("_", " ").replaceFirstChar { it.uppercase() })
+                            }
+                        }
+                    }
+                },
+                confirmButton = {
+                    Button(onClick = {
+                        scope.launch {
+                            try {
+                                val body = mutableMapOf("name" to editName, "email" to editEmail, "role" to editRole)
+                                if (editPassword.isNotBlank()) body["password"] = editPassword
+                                val resp = RetrofitClient.apiService.updateUser(user.id, body)
+                                if (resp.isSuccessful) {
+                                    showEditDialog = false
+                                    editingUser = null
+                                    snackbarHostState.showSnackbar("User updated!")
+                                    load()
+                                } else {
+                                    val err = resp.errorBody()?.string() ?: "Failed to update user"
+                                    snackbarHostState.showSnackbar("Error: $err")
+                                }
+                            } catch (e: Exception) {
+                                snackbarHostState.showSnackbar("Network error")
+                            }
+                        }
+                    }) { Text("Save") }
+                },
+                dismissButton = { TextButton(onClick = { showEditDialog = false; editingUser = null }) { Text("Cancel") } }
             )
         }
     }

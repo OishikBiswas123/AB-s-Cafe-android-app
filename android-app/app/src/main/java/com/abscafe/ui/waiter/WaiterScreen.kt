@@ -255,14 +255,15 @@ fun WaiterScreen(
                         placingOrder = true
                         scope.launch {
                             val items = cart.map { it.toOrderItemInput() }
-                            orderRepo.createOrder(selectedTable!!.id, items, isTakeaway).onSuccess { orders ->
+                            orderRepo.createOrder(selectedTable!!.id, items, isTakeaway).onSuccess { order ->
                                 val json = JSONObject().apply {
-                                    put("table_id", selectedTable!!.id)
+                                    put("order_id", order.id)
+                                    put("table_id", order.tableId)
                                     put("table_number", selectedTable?.number)
                                     put("items", JSONArray())
                                 }
                                 socketClient.emit("order:place", json)
-                                snackbarHostState.showSnackbar("Order placed! (${orders.size} orders)")
+                                snackbarHostState.showSnackbar("Order placed!")
                                 showCart = false; cart = emptyList(); isTakeaway = false
                                 currentScreen = "tables"
                                 loadData()

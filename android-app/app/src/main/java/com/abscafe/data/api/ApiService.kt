@@ -36,7 +36,7 @@ interface ApiService {
     suspend fun deleteMenuItem(@Path("id") id: Int): Response<ApiResponse>
 
     @POST("api/orders")
-    suspend fun createOrder(@Body request: CreateOrderRequest): Response<CreateOrderResponse>
+    suspend fun createOrder(@Body request: CreateOrderRequest): Response<Order>
 
     @GET("api/orders")
     suspend fun getOrders(
@@ -79,6 +79,9 @@ interface ApiService {
 
     @DELETE("api/admin/users/{id}")
     suspend fun deleteUser(@Path("id") id: Int): Response<ApiResponse>
+
+    @PUT("api/admin/users/{id}")
+    suspend fun updateUser(@Path("id") id: Int, @Body body: Map<String, String>): Response<ApiResponse>
 
     @PATCH("api/admin/users/{id}/reset-password")
     suspend fun resetPassword(@Path("id") id: Int, @Body body: Map<String, String>): Response<ApiResponse>

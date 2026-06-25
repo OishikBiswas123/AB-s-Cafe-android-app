@@ -19,53 +19,36 @@ router.post('/', authenticate, authorize('waiter', 'owner'), async (req: AuthReq
   }
 
   const db = await getDatabase();
+  const total = items.reduce((sum: number, item: OrderItemInput) => {
+    const addonTotal = (item.addons || []).reduce((a: number, ad: any) => a + ad.price, 0);
+    return sum + (item.price + addonTotal) * item.quantity;
+  }, 0);
 
-  // Look up types for each menu item to auto-split food vs beverage
-  const itemIds = items.map((i: OrderItemInput) => i.menu_item_id);
-  const menuResult = await db.query('SELECT id, type FROM menu_items WHERE id = ANY($1::int[])', [itemIds]);
-  const typeMap = new Map(menuResult.rows.map((r: any) => [r.id, r.type]));
+  const orderResult = await db.query(
+    'INSERT INTO orders (table_id, waiter_id, status, total, is_takeaway) VALUES ($1, $2, $3, $4, $5) RETURNING id',
+    [table_id, req.user!.id, 'pending', total, is_takeaway ? true : false]
+  );
+  const orderId = orderResult.rows[0].id;
 
-  const foodItems = items.filter((i: OrderItemInput) => typeMap.get(i.menu_item_id) === 'food');
-  const beverageItems = items.filter((i: OrderItemInput) => typeMap.get(i.menu_item_id) === 'beverage');
-  const groups = [foodItems, beverageItems].filter(g => g.length > 0);
-
-  const createdOrders: any[] = [];
-
-  for (const group of groups) {
-    const total = group.reduce((sum: number, item: OrderItemInput) => {
-      const addonTotal = (item.addons || []).reduce((a: number, ad: any) => a + ad.price, 0);
-      return sum + (item.price + addonTotal) * item.quantity;
-    }, 0);
-
-    const orderResult = await db.query(
-      'INSERT INTO orders (table_id, waiter_id, status, total, is_takeaway) VALUES ($1, $2, $3, $4, $5) RETURNING id',
-      [table_id, req.user!.id, 'pending', total, is_takeaway ? true : false]
+  for (const item of items) {
+    const itemResult = await db.query(
+      'INSERT INTO order_items (order_id, menu_item_id, quantity, price, notes) VALUES ($1, $2, $3, $4, $5) RETURNING id',
+      [orderId, item.menu_item_id, item.quantity, item.price, item.notes || '']
     );
-    const orderId = orderResult.rows[0].id;
+    const orderItemId = itemResult.rows[0].id;
 
-    for (const item of group) {
-      const itemResult = await db.query(
-        'INSERT INTO order_items (order_id, menu_item_id, quantity, price, notes) VALUES ($1, $2, $3, $4, $5) RETURNING id',
-        [orderId, item.menu_item_id, item.quantity, item.price, item.notes || '']
-      );
-      const orderItemId = itemResult.rows[0].id;
-
-      if (item.addons?.length) {
-        for (const addon of item.addons) {
-          await db.query('INSERT INTO order_addons (order_item_id, name, price) VALUES ($1, $2, $3)',
-            [orderItemId, addon.name, addon.price]);
-        }
+    if (item.addons?.length) {
+      for (const addon of item.addons) {
+        await db.query('INSERT INTO order_addons (order_item_id, name, price) VALUES ($1, $2, $3)',
+          [orderItemId, addon.name, addon.price]);
       }
     }
-
-    createdOrders.push(await getOrderById(orderId));
   }
 
-  if (createdOrders.length > 0) {
-    await db.query('UPDATE tables SET status = $1 WHERE id = $2', ['occupied', table_id]);
-  }
+  await db.query('UPDATE tables SET status = $1 WHERE id = $2', ['occupied', table_id]);
 
-  res.status(201).json({ success: true, orders: createdOrders });
+  const order = await getOrderById(orderId);
+  res.status(201).json(order);
 });
 
 router.get('/', authenticate, async (req: AuthRequest, res) => {
